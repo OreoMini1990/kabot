@@ -1157,35 +1157,37 @@ wss.on('connection', function connection(ws, req) {
           }))
         }));
         
-        // Bridge APK용 send 형식으로도 전송 (Bridge APK만 대상, 클라이언트는 제외)
-        replies.forEach((text, index) => {
+        // Bridge APK용 send 형식으로도 전송 (첫 번째 응답만, Bridge APK만 대상, 클라이언트는 제외)
+        if (replies.length > 0) {
           const sendMessage = {
             type: 'send',
-            id: `reply-${Date.now()}-${index}`,
+            id: `reply-${Date.now()}-0`,
             roomKey: decryptedRoomName || room || '',
-            text: text,
+            text: replies[0], // 첫 번째 응답만 전송
             ts: Math.floor(Date.now() / 1000)
           };
           const messageStr = JSON.stringify(sendMessage);
           
-          // Bridge APK만 대상으로 전송 (현재 클라이언트 제외)
+          // Bridge APK만 대상으로 전송 (현재 클라이언트 제외, 첫 번째만)
           let sentCount = 0;
           if (wss && wss.clients) {
-            wss.clients.forEach((client) => {
+            for (const client of wss.clients) {
               // 현재 클라이언트(ws)는 제외하고 Bridge APK만 전송
               if (client !== ws && client.readyState === WebSocket.OPEN) {
                 try {
                   client.send(messageStr);
                   sentCount++;
+                  // 첫 번째 Bridge APK에게만 전송하고 중단
+                  break;
                 } catch (err) {
                   console.error(`[Bridge 전송] 클라이언트 전송 실패:`, err.message);
                 }
               }
-            });
+            }
           }
           
-          console.log(`[Bridge 전송] 응답 ${index + 1}/${replies.length}: roomKey="${decryptedRoomName || room}", text="${text.substring(0, 50)}${text.length > 50 ? '...' : ''}", Bridge APK 전송=${sentCount}개`);
-        });
+          console.log(`[Bridge 전송] 응답 1/1: roomKey="${decryptedRoomName || room}", text="${replies[0].substring(0, 50)}${replies[0].length > 50 ? '...' : ''}", Bridge APK 전송=${sentCount}개`);
+        }
         
         console.log(`[응답 전송] ${replies.length}개 응답 전송 완료, chat_id: ${chatId}`);
         return;
@@ -1226,35 +1228,37 @@ wss.on('connection', function connection(ws, req) {
       };
       ws.send(JSON.stringify(response));
       
-      // Bridge APK용 send 형식으로도 전송 (Bridge APK만 대상, 클라이언트는 제외)
-      replies.forEach((text, index) => {
+      // Bridge APK용 send 형식으로도 전송 (첫 번째 응답만, Bridge APK만 대상, 클라이언트는 제외)
+      if (replies.length > 0) {
         const sendMessage = {
           type: 'send',
-          id: `reply-${Date.now()}-${index}`,
+          id: `reply-${Date.now()}-0`,
           roomKey: room || '',
-          text: text,
+          text: replies[0], // 첫 번째 응답만 전송
           ts: Math.floor(Date.now() / 1000)
         };
         const messageStr = JSON.stringify(sendMessage);
         
-        // Bridge APK만 대상으로 전송 (현재 클라이언트 제외)
+        // Bridge APK만 대상으로 전송 (현재 클라이언트 제외, 첫 번째만)
         let sentCount = 0;
         if (wss && wss.clients) {
-          wss.clients.forEach((client) => {
+          for (const client of wss.clients) {
             // 현재 클라이언트(ws)는 제외하고 Bridge APK만 전송
             if (client !== ws && client.readyState === WebSocket.OPEN) {
               try {
                 client.send(messageStr);
                 sentCount++;
+                // 첫 번째 Bridge APK에게만 전송하고 중단
+                break;
               } catch (err) {
                 console.error(`[Bridge 전송] 클라이언트 전송 실패:`, err.message);
               }
             }
-          });
+          }
         }
         
-        console.log(`[Bridge 전송] 응답 ${index + 1}/${replies.length}: roomKey="${room}", text="${text.substring(0, 50)}${text.length > 50 ? '...' : ''}", Bridge APK 전송=${sentCount}개`);
-      });
+        console.log(`[Bridge 전송] 응답 1/1: roomKey="${room}", text="${replies[0].substring(0, 50)}${replies[0].length > 50 ? '...' : ''}", Bridge APK 전송=${sentCount}개`);
+      }
     } catch (error) {
       console.error(`[${new Date().toISOString()}] 메시지 처리 오류:`, error);
       ws.send(JSON.stringify({

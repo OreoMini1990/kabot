@@ -650,34 +650,15 @@ function handleMessage(room, msg, sender, isGroupChat) {
         return replies; // 빈 배열 반환
     }
 
-    // ========== "의운모" 채팅방의 모든 메시지에 "helloworld" 응답 ==========
-    replies.push("helloworld");
-            return replies;
-
-    // 공지 발송 체크 (명령어가 아닌 일반 메시지일 때만)
-    if (!msg.startsWith('/')) {
-        const scheduledNotice = NOTICE_SYSTEM.shouldSendScheduledNotice();
-        if (scheduledNotice && scheduledNotice.shouldSend) {
-            NOTICE_SYSTEM.sendScheduledNotice(replies, scheduledNotice.content);
-        } else {
-            const notice = NOTICE_SYSTEM.getNotice();
-            let hasScheduledNotice = false;
-            if (notice) {
-                const lines = notice.split("\n");
-                const header = lines[0];
-                if (header.includes("|") && header.split("|").length >= 3) {
-                    hasScheduledNotice = true;
-                }
-            }
-            
-            if (!hasScheduledNotice && NOTICE_SYSTEM.shouldSendNotice()) {
-                NOTICE_SYSTEM.sendNotice(replies);
-            }
-        }
+    // ========== "!hi"로 시작하는 메시지에만 응답 ==========
+    const trimmedMsg = msg.trim();
+    if (trimmedMsg.toLowerCase().startsWith("!hi")) {
+        replies.push("helloworld");
+        return replies;
     }
-
-    // 채팅 횟수 기록
-    recordChatCount(sender);
+    
+    // "!hi"가 아니면 응답하지 않음 (빈 배열 반환)
+    return replies;
 
     // ========== 관리자 명령어 ==========
 

@@ -558,6 +558,10 @@ def get_new_messages():
 # WebSocket 연결 관리
 ws_connection = None
 ws_lock = threading.Lock()
+ws_reconnect_thread = None  # 재연결 스레드
+ws_reconnect_attempts = 0  # 재연결 시도 횟수
+MAX_RECONNECT_ATTEMPTS = 10  # 최대 재연결 시도 횟수
+RECONNECT_INTERVAL = 3  # 재연결 간격 (초)
 # 마지막 메시지의 room 정보 저장 (서버 응답에 room이 없을 때 사용)
 last_message_room = None
 last_message_chat_id = None  # 마지막 메시지의 chat_id (숫자)
@@ -595,15 +599,51 @@ def connect_websocket():
         print(f"[WebSocket 오류] {error}")
     
     def on_close(ws, close_status_code, close_msg):
-        """WebSocket 연결 종료"""
-        global ws_connection
-        print("[WebSocket 연결 종료]")
+        """WebSocket 연결 종료 - 재연결 시도"""
+        global ws_connection, ws_reconnect_thread, ws_reconnect_attempts
+        print(f"[WebSocket 연결 종료] code={close_status_code}, msg={close_msg}")
         ws_connection = None
+        
+        # 재연결 스레드가 이미 실행 중이면 중복 실행 방지
+        if ws_reconnect_thread and ws_reconnect_thread.is_alive():
+            print("[재연결] 이미 재연결 시도 중입니다.")
+            return
+        
+        # 재연결 스레드 시작
+        def reconnect_loop():
+            global ws_connection, ws_reconnect_attempts
+            ws_reconnect_attempts = 0
+            
+            while ws_reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
+                ws_reconnect_attempts += 1
+                print(f"[재연결 시도 {ws_reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS}] {RECONNECT_INTERVAL}초 후 재연결 시도...")
+                time.sleep(RECONNECT_INTERVAL)
+                
+                # 이미 연결되어 있으면 중단
+                if ws_connection and ws_connection.sock and ws_connection.sock.connected:
+                    print("[재연결] 이미 연결되어 있습니다.")
+                    break
+                
+                # 재연결 시도
+                print(f"[재연결 시도 {ws_reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS}] 연결 시도 중...")
+                if connect_websocket():
+                    print(f"[✓] 재연결 성공 ({ws_reconnect_attempts}번째 시도)")
+                    ws_reconnect_attempts = 0  # 성공 시 카운터 리셋
+                    break
+                else:
+                    print(f"[✗] 재연결 실패 ({ws_reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})")
+            
+            if ws_reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
+                print(f"[✗] 재연결 실패: 최대 시도 횟수({MAX_RECONNECT_ATTEMPTS}) 초과. 재연결을 중단합니다.")
+        
+        ws_reconnect_thread = threading.Thread(target=reconnect_loop, daemon=True)
+        ws_reconnect_thread.start()
     
     def on_open(ws):
         """WebSocket 연결 성공"""
-        global ws_connection
+        global ws_connection, ws_reconnect_attempts
         print("[✓] WebSocket 연결 성공")
+        ws_reconnect_attempts = 0  # 연결 성공 시 재연결 카운터 리셋
         # 연결 메시지 전송
         ws.send(json.dumps({"type": "connect"}))
     
@@ -1321,18 +1361,27 @@ def poll_messages():
                         v_field = None
                         kakao_user_id = None
                         enc_type = 31  # 기본값
+                        is_mine = False  # 자신이 보낸 메시지 여부
                         
                         if len(msg) >= 6:
                             v_field = msg[5]
-                            # v 필드를 JSON 파싱하여 enc 추출
+                            # v 필드를 JSON 파싱하여 enc 추출 및 isMine 확인
                             if v_field:
                                 try:
                                     if isinstance(v_field, str):
-                                        v_parsed = json.loads(v_field)
-                                        if isinstance(v_parsed, dict) and "enc" in v_parsed:
-                                            enc_type = v_parsed["enc"]
-                                            if enc_type is None:
-                                                enc_type = 31  # 기본값 (이미지 분석 결과: i9은 31로 고정)
+                                        v_json = json.loads(v_field)
+                                        if isinstance(v_json, dict):
+                                            # isMine 필드 확인 (자신이 보낸 메시지)
+                                            is_mine = v_json.get("isMine", False)
+                                            if is_mine:
+                                                print(f"[필터링] 자신이 보낸 메시지 스킵: ID={msg_id}, sender={user_id}")
+                                                skipped_count += 1
+                                                continue  # 자신이 보낸 메시지는 서버로 전송하지 않음
+                                            # enc 추출
+                                            if "enc" in v_json:
+                                                enc_type = v_json["enc"]
+                                                if enc_type is None:
+                                                    enc_type = 31  # 기본값
                                 except (json.JSONDecodeError, TypeError, KeyError):
                                     # JSON 파싱 실패 시 기본값 사용
                                     pass
