@@ -1,0 +1,11 @@
+# 카카오톡 봇 클라이언트 필수 패키지
+
+# WebSocket 통신
+websocket-client>=1.6.0
+
+# 암호화/복호화
+pycryptodome>=3.19.0
+
+# 표준 라이브러리 (설치 불필요)
+# sqlite3, time, json, os, threading, datetime, base64, hashlib
+
