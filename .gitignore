@@ -14,6 +14,7 @@ npm-debug.log*
 # Environment variables
 .env
 .env.local
+.env.*
 
 # IDE
 .vscode/
@@ -30,6 +31,8 @@ Thumbs.db
 *.db
 *.sqlite
 data/
+KakaoTalk.db
+KakaoTalk2.db
 
 # Build files
 dist/
@@ -41,4 +44,17 @@ build/
 # Test files
 test_output/
 *.test.js
+
+# Personal files
+last_message_id.txt
+my_user_id.txt
+*.txt
+!README*.txt
+!CHANGELOG.txt
+!VERSION.txt
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
 

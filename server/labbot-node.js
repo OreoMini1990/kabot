@@ -639,33 +639,20 @@ function removeItem(itemName, replies) {
 function handleMessage(room, msg, sender, isGroupChat) {
     const replies = [];
     
-    // ========== 1차 목표: 모든 메시지에 "helloworld" 응답 ==========
-    // TODO: 1차 목표 달성 후 채팅방 체크 및 labbot.js 기능 구현
-    replies.push("helloworld");
-    return replies;
-    
-    // ========== 원래 로직 (주석 처리) ==========
-    /*
-    // 채팅방 체크
+    // ========== 채팅방 필터링: "의운모" 채팅방만 반응 ==========
+    // room 파라미터가 채팅방 이름 또는 ID일 수 있음
     const roomMatch = room === CONFIG.ROOM_NAME || 
-                     room.indexOf(CONFIG.ROOM_NAME) !== -1 ||
-                     CONFIG.ROOM_NAME.indexOf(room) !== -1;
+                     (typeof room === 'string' && room.indexOf(CONFIG.ROOM_NAME) !== -1) ||
+                     (typeof CONFIG.ROOM_NAME === 'string' && CONFIG.ROOM_NAME.indexOf(room) !== -1);
     
     if (!roomMatch) {
+        // "의운모" 채팅방이 아니면 응답하지 않음
         return replies; // 빈 배열 반환
     }
-
-    // 비속어/욕설 필터링 (관리자는 제외)
-    if (!isAdmin(sender)) {
-        const filterResult = PROFANITY_FILTER.check(msg);
-        if (filterResult.blocked) {
-            PROFANITY_FILTER.log(sender, msg, filterResult.reason);
-            const warningCount = PROFANITY_FILTER.addWarning(sender);
-            const warningMessage = PROFANITY_FILTER.getWarningMessage(sender, warningCount);
-            replies.push(warningMessage);
-            return replies;
-        }
-    }
+    
+    // ========== "의운모" 채팅방의 모든 메시지에 "helloworld" 응답 ==========
+    replies.push("helloworld");
+    return replies;
 
     // 공지 발송 체크 (명령어가 아닌 일반 메시지일 때만)
     if (!msg.startsWith('/')) {

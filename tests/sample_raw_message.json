@@ -1,0 +1,16 @@
+{
+  "chat_id": 18469584418690487,
+  "user_id": 4897202238384074000,
+  "message": "RcrN4TWyfEL0p6O+yWtOpw==",
+  "v": "{\"enc\": 31, \"origin\": \"MSG\", \"isMine\": false, \"c\": \"12-15 18:37:51\"}",
+  "json": {
+    "room_name": "oVh/wyh41KmdW0J3fxuKIQ==",
+    "room_data": {
+      "private_meta": "{\"name\": \"oVh/wyh41KmdW0J3fxuKIQ==\", \"enc\": 31}"
+    },
+    "userId": 4897202238384074000,
+    "myUserId": 429744344,
+    "encType": 31
+  }
+}
+

@@ -1,0 +1,20 @@
+{
+  "_comment": "이전에 테스트했던 실제 raw 메시지 데이터 형식",
+  "_instructions": "아래 형식에 맞춰 실제 데이터를 입력하세요",
+  
+  "chat_id": 18469584418690487,
+  "user_id": 4897202238384074000,
+  "message": "실제암호화된메시지base64문자열",
+  "v": "{\"enc\": 31, \"origin\": \"MSG\", \"isMine\": false, \"c\": \"12-15 18:37:51\"}",
+  "json": {
+    "room_name": "실제암호화된채팅방이름base64문자열",
+    "room_name_decrypted": null,
+    "room_data": {
+      "private_meta": "{\"name\": \"실제암호화된채팅방이름base64문자열\", \"enc\": 31}"
+    },
+    "userId": 4897202238384074000,
+    "myUserId": 429744344,
+    "encType": 31
+  }
+}
+

@@ -50,10 +50,16 @@ except ImportError as e:
 
 # 카카오톡 DB 경로 (하율 패치로 접근 가능)
 DB_PATH = "/data/data/com.kakao.talk/databases/KakaoTalk.db"
+DB_PATH2 = "/data/data/com.kakao.talk/databases/KakaoTalk2.db"  # Iris 방식: db2로 attach
 # 서버 URL (WebSocket)
 WS_URL = "ws://211.218.42.222:5002/ws"
 HTTP_URL = "http://211.218.42.222:5002"
-# Iris 서버 사용 안 함 - 자체 코드로 카카오톡 메시지 전송
+
+# Iris HTTP API 설정 (카카오톡 메시지 전송용)
+# Iris 앱이 실행 중이어야 함 (기본 포트: 3000)
+# 환경 변수로 설정 가능: IRIS_URL=http://[ANDROID_IP]:3000
+IRIS_URL = os.getenv("IRIS_URL", "http://localhost:3000")  # 기본값: localhost:3000
+IRIS_ENABLED = os.getenv("IRIS_ENABLED", "true").lower() == "true"  # 기본값: true
 
 # 마지막 처리한 메시지 ID 추적 (파일로 저장)
 STATE_FILE = os.path.expanduser("~/last_message_id.txt")
@@ -349,6 +355,114 @@ def get_latest_message_id():
         print(f"[검증 오류] 최신 메시지 ID 조회 실패: {e}")
         return None
 
+def get_chat_room_data(chat_id):
+    """채팅방 ID로 채팅방 데이터 조회 (Iris 방식: private_meta에서 name 추출)"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Iris 방식: KakaoTalk2.db를 db2로 attach
+        db2_attached = False
+        try:
+            if os.path.exists(DB_PATH2):
+                cursor.execute(f"ATTACH DATABASE '{DB_PATH2}' AS db2")
+                db2_attached = True
+                print(f"[채팅방] db2 attach 성공: {DB_PATH2}")
+            else:
+                print(f"[채팅방] db2 파일 없음: {DB_PATH2}")
+        except Exception as e:
+            print(f"[채팅방] db2 attach 실패: {e}")
+        
+        # Iris 방식: chat_rooms 테이블의 private_meta 컬럼에서 name 추출
+        try:
+            # private_meta 컬럼 확인 (Iris 방식)
+            cursor.execute("SELECT private_meta FROM chat_rooms WHERE id = ?", (chat_id,))
+            result = cursor.fetchone()
+            
+            if result:
+                private_meta_value = result[0]
+                
+                # Iris 방식: !value.isNullOrEmpty() 체크
+                if private_meta_value and str(private_meta_value).strip():
+                    private_meta_str = str(private_meta_value)
+                    
+                    try:
+                        # JSON 파싱 (Iris: Json.decodeFromString)
+                        private_meta = json.loads(private_meta_str)
+                        
+                        # Iris: name.jsonPrimitive.content
+                        name_element = private_meta.get('name')
+                        
+                        if name_element is not None:
+                            # Iris: name.jsonPrimitive.content
+                            if isinstance(name_element, str):
+                                room_name_raw = name_element
+                            elif isinstance(name_element, dict):
+                                # JsonPrimitive의 content 속성
+                                room_name_raw = name_element.get('content') or name_element.get('value') or str(name_element)
+                            else:
+                                room_name_raw = str(name_element)
+                            
+                            if room_name_raw:
+                                conn.close()
+                                return {
+                                    'name': str(room_name_raw),  # 암호화된 이름 (JSON에서 추출)
+                                    'name_column': 'private_meta.name',
+                                    'raw_data': {'private_meta': private_meta_str, 'private_meta_parsed': private_meta}
+                                }
+                    except json.JSONDecodeError as e:
+                        pass
+                else:
+                    print(f"[채팅방] private_meta가 NULL이거나 비어있음: chat_id={chat_id}")
+            else:
+                print(f"[채팅방] private_meta 조회 결과 없음: chat_id={chat_id}")
+            
+            # private_meta에 name이 없으면 db2.open_link 테이블 확인 (Iris 방식)
+            if db2_attached:
+                try:
+                    cursor.execute("SELECT name FROM db2.open_link WHERE id = (SELECT link_id FROM chat_rooms WHERE id = ?)", (chat_id,))
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        room_name_raw = result[0]
+                        print(f"[채팅방] db2.open_link에서 이름 조회 성공: chat_id={chat_id}, name=\"{room_name_raw}\"")
+                        conn.close()
+                        return {
+                            'name': room_name_raw,
+                            'name_column': 'db2.open_link.name',
+                            'raw_data': {'name': room_name_raw}
+                        }
+                    else:
+                        print(f"[채팅방] db2.open_link 조회 결과 없음: chat_id={chat_id}")
+                except Exception as e:
+                    print(f"[채팅방] db2.open_link 조회 실패: chat_id={chat_id}, 오류={e}")
+            else:
+                print(f"[채팅방] db2 attach 안됨, db2.open_link 확인 불가: chat_id={chat_id}")
+            
+            # fallback: 직접 name 컬럼 확인
+            cursor.execute("PRAGMA table_info(chat_rooms)")
+            columns_info = cursor.fetchall()
+            available_columns = [col[1] for col in columns_info]
+            
+            if 'name' in available_columns:
+                cursor.execute("SELECT name FROM chat_rooms WHERE id = ?", (chat_id,))
+                result = cursor.fetchone()
+                if result and result[0]:
+                    room_name_raw = result[0]
+                    conn.close()
+                    return {
+                        'name': room_name_raw,
+                        'name_column': 'name',
+                        'raw_data': {'name': room_name_raw}
+                    }
+        except Exception as e:
+            print(f"[채팅방] 데이터 조회 예외: chat_id={chat_id}, 오류={e}")
+        
+        conn.close()
+        return None
+    except Exception as e:
+        print(f"[채팅방] DB 연결 오류: chat_id={chat_id}, 오류={e}")
+        return None
+
 def get_new_messages():
     """새 메시지 조회 (중복 방지)"""
     last_id = load_last_message_id()
@@ -449,6 +563,7 @@ ws_connection = None
 ws_lock = threading.Lock()
 # 마지막 메시지의 room 정보 저장 (서버 응답에 room이 없을 때 사용)
 last_message_room = None
+last_message_chat_id = None  # 마지막 메시지의 chat_id (숫자)
 
 def connect_websocket():
     """WebSocket 연결"""
@@ -456,7 +571,7 @@ def connect_websocket():
     
     def on_message(ws, message):
         """서버로부터 메시지 수신 및 카카오톡에 응답 전송"""
-        global last_message_room
+        global last_message_room, last_message_chat_id
         
         try:
             data = json.loads(message)
@@ -471,25 +586,49 @@ def connect_websocket():
                     if isinstance(reply_item, dict):
                         reply_text = reply_item.get('text', '')
                         reply_room = reply_item.get('room', '') or last_message_room
+                        reply_chat_id = reply_item.get('chat_id') or last_message_chat_id
                         
-                        if reply_text and reply_room:
-                            # 카카오톡에 메시지 전송
-                            success = send_to_kakaotalk(reply_room, reply_text)
-                            if success:
-                                print(f"[✓] 응답 {idx+1}/{len(replies)} 전송 완료")
-                            else:
-                                print(f"[✗] 응답 {idx+1}/{len(replies)} 전송 실패")
+                        # chat_id를 숫자로 변환 (문자열이면 숫자로 변환)
+                        if reply_chat_id:
+                            if isinstance(reply_chat_id, str) and reply_chat_id.isdigit():
+                                try:
+                                    reply_chat_id = int(reply_chat_id)
+                                except (ValueError, OverflowError):
+                                    print(f"[경고] chat_id 숫자 변환 실패: {reply_chat_id}")
+                                    reply_chat_id = None
+                            elif not isinstance(reply_chat_id, int):
+                                print(f"[경고] chat_id 타입 오류: {type(reply_chat_id)}, 값: {reply_chat_id}")
+                                reply_chat_id = None
+                        
+                        print(f"[응답 처리] {idx+1}/{len(replies)}: text=\"{reply_text[:30]}...\", chat_id={reply_chat_id}, room=\"{reply_room}\"")
+                        
+                        if reply_text:
+                            # chat_id 우선 사용 (숫자), 없으면 room 사용
+                            target_room = reply_chat_id if reply_chat_id else reply_room
                             
-                            # 메시지 간 지연 (Iris의 messageSendRate와 유사)
-                            # 너무 빠르게 전송하면 카카오톡이 무시할 수 있음
-                            if idx < len(replies) - 1:  # 마지막 메시지가 아니면
-                                time.sleep(0.5)  # 500ms 지연
-                        elif reply_text:
-                            print(f"[경고] room 정보 없음, 응답 전송 스킵: {reply_text[:50]}...")
+                            if target_room:
+                                print(f"[응답 전송] chat_id={reply_chat_id}, target_room={target_room}, 타입={type(target_room)}")
+                                # 카카오톡에 메시지 전송
+                                success = send_to_kakaotalk(target_room, reply_text)
+                                if success:
+                                    print(f"[✓] 응답 {idx+1}/{len(replies)} 전송 완료")
+                                else:
+                                    print(f"[✗] 응답 {idx+1}/{len(replies)} 전송 실패")
+                                
+                                # 메시지 간 지연 (Iris의 messageSendRate와 유사)
+                                # 너무 빠르게 전송하면 카카오톡이 무시할 수 있음
+                                if idx < len(replies) - 1:  # 마지막 메시지가 아니면
+                                    time.sleep(0.5)  # 500ms 지연
+                            else:
+                                print(f"[경고] room/chat_id 정보 없음, 응답 전송 스킵: {reply_text[:50]}...")
+                        else:
+                            print(f"[경고] 빈 응답 텍스트, 스킵")
                     elif isinstance(reply_item, str):
                         # 문자열로 직접 전송된 경우
-                        if last_message_room:
-                            success = send_to_kakaotalk(last_message_room, reply_item)
+                        target_room = last_message_chat_id if last_message_chat_id else last_message_room
+                        
+                        if target_room:
+                            success = send_to_kakaotalk(target_room, reply_item)
                             if success:
                                 print(f"[✓] 응답 {idx+1}/{len(replies)} 전송 완료")
                             else:
@@ -498,7 +637,7 @@ def connect_websocket():
                             if idx < len(replies) - 1:
                                 time.sleep(0.5)
                         else:
-                            print(f"[경고] room 정보 없음, 응답 전송 스킵: {reply_item[:50]}...")
+                            print(f"[경고] room/chat_id 정보 없음, 응답 전송 스킵: {reply_item[:50]}...")
             elif data.get('type') == 'reply' and not data.get('replies'):
                 # 빈 응답은 로그 출력 안 함
                 pass
@@ -871,13 +1010,16 @@ def decrypt_message(encrypted_message, v_field=None, user_id=None, enc_type=31, 
 
 def send_to_kakaotalk(room_id, message_text):
     """
-    카카오톡에 메시지 전송 (Iris Replier.kt 기반, 자체 구현)
+    카카오톡에 메시지 전송
     
-    Iris의 sendMessageInternal() 함수를 참고하여 Intent 전송
-    - Component: com.kakao.talk/com.kakao.talk.notification.NotificationActionService
-    - Action: com.kakao.talk.notification.REPLY_MESSAGE
-    - Extra: noti_referer, chat_id
-    - RemoteInput: reply_message (Bundle)
+    방법 1 (권장): Iris HTTP API 사용
+    - Iris 앱의 /reply 엔드포인트를 통해 메시지 전송
+    - Iris가 RemoteInput Bundle을 제대로 전달할 수 있음
+    - Iris 원본 코드와 동일한 방식으로 작동
+    
+    방법 2 (fallback): am startservice 직접 호출
+    - RemoteInput Bundle 전달 불가로 인해 실패할 가능성 높음
+    - Iris HTTP API를 사용할 수 없을 때만 시도
     
     Args:
         room_id: 채팅방 ID (문자열 또는 숫자)
@@ -898,6 +1040,67 @@ def send_to_kakaotalk(room_id, message_text):
             print(f"[경고] 빈 메시지, 전송 스킵")
             return False
         
+        # 방법 1: Iris HTTP API 사용 (권장)
+        # Iris 원본 코드: IrisServer.kt의 /reply 엔드포인트
+        # POST /reply
+        # {
+        #   "type": "text",
+        #   "room": "[CHAT_ROOM_ID]",
+        #   "data": "[MESSAGE_TEXT]"
+        # }
+        if IRIS_ENABLED:
+            try:
+                import urllib.request
+                import urllib.parse
+                
+                # Iris API 요청 데이터
+                request_data = {
+                    "type": "text",
+                    "room": str(chat_id),  # Iris는 문자열로 받아서 Long으로 변환
+                    "data": message_text
+                }
+                
+                # JSON 직렬화
+                json_data = json.dumps(request_data).encode('utf-8')
+                
+                # HTTP POST 요청
+                url = f"{IRIS_URL}/reply"
+                req = urllib.request.Request(
+                    url,
+                    data=json_data,
+                    headers={'Content-Type': 'application/json'}
+                )
+                
+                try:
+                    with urllib.request.urlopen(req, timeout=5) as response:
+                        response_data = json.loads(response.read().decode('utf-8'))
+                        if response_data.get('success'):
+                            print(f"[✓] Iris HTTP API를 통한 카카오톡 전송 성공: chat_id={chat_id}, message={message_text[:50]}...")
+                            return True
+                        else:
+                            print(f"[정보] Iris HTTP API 응답: success=false, message={response_data.get('message', 'unknown')}")
+                except urllib.error.HTTPError as e:
+                    if e.code == 404:
+                        print(f"[정보] Iris HTTP API를 사용할 수 없음 (404): {url}")
+                        print(f"[정보] Iris 앱이 실행 중인지 확인하세요. am startservice 방식으로 fallback")
+                    else:
+                        print(f"[정보] Iris HTTP API 오류 ({e.code}): {e.reason}")
+                        print(f"[정보] am startservice 방식으로 fallback")
+                except urllib.error.URLError as e:
+                    print(f"[정보] Iris HTTP API 연결 실패: {e.reason}")
+                    print(f"[정보] Iris URL 확인: {IRIS_URL}")
+                    print(f"[정보] am startservice 방식으로 fallback")
+                except Exception as e:
+                    print(f"[정보] Iris HTTP API 오류: {e}")
+                    print(f"[정보] am startservice 방식으로 fallback")
+            except ImportError:
+                print(f"[정보] urllib 모듈을 사용할 수 없음, am startservice 방식으로 fallback")
+            except Exception as e:
+                print(f"[정보] Iris HTTP API 시도 중 오류: {e}")
+                print(f"[정보] am startservice 방식으로 fallback")
+        
+        # 방법 2: am startservice 직접 호출 (fallback)
+        # 주의: RemoteInput Bundle 전달 불가로 인해 실패할 가능성 높음
         import subprocess
         
         # Iris Replier.kt의 sendMessageInternal() 기반
@@ -908,15 +1111,49 @@ def send_to_kakaotalk(room_id, message_text):
         # 쉘 명령어에서 특수 문자를 안전하게 처리
         message_escaped = message_text.replace("'", "'\"'\"'").replace("\\", "\\\\")
         
-        # 방법 1: 기본 Intent 전송 (RemoteInput 없이)
-        # 참고: 일부 경우에는 기본 Extra만으로도 작동할 수 있음
+        # Iris Replier.kt의 sendMessageInternal() 기반 구현
+        # Component: com.kakao.talk/com.kakao.talk.notification.NotificationActionService
+        # Action: com.kakao.talk.notification.REPLY_MESSAGE
+        # Extra: noti_referer, chat_id
+        # RemoteInput: reply_message (Bundle에 저장)
+        
+        # 방법 1: Iris 원본 방식 시뮬레이션
+        # Iris Replier.kt의 sendMessageInternal() 분석:
+        # 1. putExtra("noti_referer", referer) - 문자열
+        # 2. putExtra("chat_id", chatId) - Long (64비트)
+        # 3. action = "com.kakao.talk.notification.REPLY_MESSAGE"
+        # 4. Bundle().putCharSequence("reply_message", msg)
+        # 5. RemoteInput.addResultsToIntent()로 Bundle 추가
+        # 6. AndroidHiddenApi.startService(intent)
+        #
+        # am startservice의 한계:
+        # - RemoteInput Bundle을 직접 전달할 수 없음
+        # - --el (Long) 옵션이 지원되지 않을 수 있음
+        # - Intent.putExtra()는 문자열을 Long으로 자동 변환하지 않을 수 있음
+        #
+        # 시도 순서:
+        # 1. --el (Long) 시도 (Iris 원본 방식)
+        # 2. --es (문자열) 시도 (fallback)
+        # 3. RemoteInput Bundle 시뮬레이션 시도
+        
+        # Iris 원본 코드 분석:
+        # 1. putExtra("noti_referer", referer) - 문자열
+        # 2. putExtra("chat_id", chatId) - Long (64비트)
+        # 3. putExtra("is_chat_thread_notification", threadId != null) - Boolean
+        # 4. if (threadId != null) putExtra("thread_id", threadId) - Long
+        # 5. action = "com.kakao.talk.notification.REPLY_MESSAGE"
+        # 6. Bundle().putCharSequence("reply_message", msg)
+        # 7. RemoteInput.addResultsToIntent()로 Bundle 추가
+        #
+        # threadId는 null이므로 is_chat_thread_notification=false
         cmd_basic = [
             "am", "startservice",
             "-n", "com.kakao.talk/.notification.NotificationActionService",
             "-a", "com.kakao.talk.notification.REPLY_MESSAGE",
             "--es", "noti_referer", referer,
-            "--ei", "chat_id", str(chat_id),
-            "--es", "reply_message", message_text
+            "--el", "chat_id", str(chat_id),  # Long 타입으로 전달 (Iris 원본 방식)
+            "--ez", "is_chat_thread_notification", "false",  # Boolean (Iris 원본 코드 참고)
+            "--es", "reply_message", message_text  # RemoteInput Bundle 대신 직접 Extra로 전달
         ]
         
         try:
@@ -929,60 +1166,129 @@ def send_to_kakaotalk(room_id, message_text):
             
             if result.returncode == 0:
                 # 성공 (출력이 없거나 빈 출력이면 성공으로 간주)
-                if not result.stderr or "Error" not in result.stderr:
-                    print(f"[✓] 카카오톡 전송 성공: room_id={chat_id}, message={message_text[:50]}...")
+                # 하지만 am startservice 명령어 성공 != 실제 카카오톡 전송 성공
+                # RemoteInput Bundle을 전달할 수 없어서 카카오톡이 메시지를 인식하지 못할 수 있음
+                if not result.stderr or ("Error" not in result.stderr and "error" not in result.stderr.lower() and "For input string" not in result.stderr):
+                    print(f"[정보] am startservice 명령어 실행 성공 (Long 타입): chat_id={chat_id}, message={message_text[:50]}...")
+                    print(f"[경고] am startservice는 RemoteInput Bundle을 전달할 수 없어 실제 전송이 실패할 수 있음")
+                    print(f"[경고] 카카오톡 앱에서 실제 메시지 전송 여부를 확인하세요")
+                    # 명령어는 성공했지만 실제 전송 여부는 불확실
+                    # RemoteInput Bundle 없이는 카카오톡이 메시지를 인식하지 못할 가능성이 높음
                     return True
                 else:
-                    print(f"[정보] 기본 Intent 실패, RemoteInput 방식 시도: {result.stderr}")
+                    # --el이 지원되지 않거나 오류 발생, 문자열 방식으로 재시도
+                    if "For input string" in result.stderr:
+                        print(f"[정보] --el (Long) 실패: 큰 숫자 처리 오류 (stderr: {result.stderr}), 문자열 방식 시도")
+                    else:
+                        print(f"[정보] --el (Long) 실패 (stderr: {result.stderr}), 문자열 방식 시도")
             else:
-                print(f"[정보] 기본 Intent 실패 (코드: {result.returncode}), RemoteInput 방식 시도")
+                # --el이 지원되지 않을 수 있음, 문자열 방식으로 재시도
+                print(f"[정보] --el (Long) 실패 (코드: {result.returncode}), 문자열 방식 시도")
         except FileNotFoundError:
             print(f"[경고] 'am' 명령어를 찾을 수 없습니다.")
             print(f"[정보] Termux 환경에서 실행 중인지 확인하세요.")
-            print(f"[정보] ADB를 통한 실행 방법:")
-            print(f"  adb shell am startservice -n com.kakao.talk/.notification.NotificationActionService \\")
-            print(f"    -a com.kakao.talk.notification.REPLY_MESSAGE \\")
-            print(f"    --es noti_referer '{referer}' \\")
-            print(f"    --ei chat_id {chat_id} \\")
-            print(f"    --es reply_message '{message_escaped}'")
             return False
         except subprocess.TimeoutExpired:
             print(f"[경고] Intent 전송 타임아웃")
             return False
         except Exception as e:
-            print(f"[정보] 기본 Intent 오류: {e}, RemoteInput 방식 시도")
+            print(f"[정보] 기본 Intent 오류: {e}, RemoteInput Bundle 방식 시도")
         
-        # 방법 2: RemoteInput 포함 Intent 전송 시도
-        # 참고: RemoteInput은 Bundle을 통해 전달되므로 복잡함
-        # 하지만 일부 경우에는 추가 Extra로 작동할 수 있음
-        
-        # RemoteInput의 결과는 Bundle에 저장되므로,
-        # Intent의 추가 Extra로 시도
+        # 방법 2: --el이 지원되지 않는 경우 --es (문자열)로 시도
+        # Intent.putExtra()는 문자열을 자동으로 Long으로 변환할 수 있음
         try:
-            # RemoteInput 결과를 시뮬레이션하기 위해 추가 Extra 시도
-            # 참고: 실제 RemoteInput은 복잡하지만, 일부 경우에는 작동할 수 있음
-            cmd_remote = [
+            cmd_string = [
                 "am", "startservice",
                 "-n", "com.kakao.talk/.notification.NotificationActionService",
                 "-a", "com.kakao.talk.notification.REPLY_MESSAGE",
                 "--es", "noti_referer", referer,
-                "--ei", "chat_id", str(chat_id),
-                "--es", "android.remoteinput.results", json.dumps({"reply_message": message_text}),
+                "--es", "chat_id", str(chat_id),  # 문자열로 전달 (Intent에서 자동 변환)
+                "--ez", "is_chat_thread_notification", "false",  # Boolean (Iris 원본 코드 참고)
                 "--es", "reply_message", message_text
             ]
             
             result = subprocess.run(
-                cmd_remote,
+                cmd_string,
                 capture_output=True,
                 text=True,
                 timeout=5
             )
             
-            if result.returncode == 0 and (not result.stderr or "Error" not in result.stderr):
-                print(f"[✓] 카카오톡 전송 성공 (RemoteInput 방식): room_id={chat_id}, message={message_text[:50]}...")
+            if result.returncode == 0 and (not result.stderr or ("Error" not in result.stderr and "error" not in result.stderr.lower())):
+                print(f"[정보] am startservice 명령어 실행 성공 (문자열 chat_id 방식): chat_id={chat_id}, message={message_text[:50]}...")
+                print(f"[참고] 실제 카카오톡 전송 여부는 카카오톡에서 확인 필요 (명령어 성공 != 메시지 전송 성공)")
+                # 명령어는 성공했지만 실제 전송 여부는 불확실하므로 True 반환
                 return True
+            else:
+                print(f"[정보] 문자열 chat_id 방식 실패: returncode={result.returncode}, stderr={result.stderr}")
         except Exception as e:
-            print(f"[정보] RemoteInput 방식 오류: {e}")
+            print(f"[정보] 문자열 chat_id 방식 오류: {e}")
+        
+        # 방법 3: RemoteInput Bundle 시뮬레이션 (Iris 방식)
+        # Iris의 RemoteInput.addResultsToIntent()는 Bundle을 Intent에 특정 키로 추가
+        # Android 시스템은 RemoteInput 결과를 Intent의 특정 키에 Bundle로 저장
+        # 일반적으로 "android.remoteinput.results" 키를 사용하지만,
+        # am startservice로는 Bundle 객체를 직접 전달할 수 없음
+        #
+        # 대안: reply_message를 직접 Extra로 전달 (카카오톡이 이를 인식할 수 있는지 확인)
+        # 또는 다른 키 이름 시도
+        try:
+            # 방법 3-1: android.remoteinput.results 키 시도 (Bundle 시뮬레이션)
+            cmd_remote1 = [
+                "am", "startservice",
+                "-n", "com.kakao.talk/.notification.NotificationActionService",
+                "-a", "com.kakao.talk.notification.REPLY_MESSAGE",
+                "--es", "noti_referer", referer,
+                "--el", "chat_id", str(chat_id),  # Long 타입 유지
+                "--ez", "is_chat_thread_notification", "false",  # Boolean (Iris 원본 코드 참고)
+                "--es", "android.remoteinput.results", json.dumps({"reply_message": message_text}),
+                "--es", "reply_message", message_text  # 추가로 직접 전달
+            ]
+            
+            result = subprocess.run(
+                cmd_remote1,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode == 0 and (not result.stderr or ("Error" not in result.stderr and "error" not in result.stderr.lower())):
+                print(f"[정보] am startservice 명령어 실행 성공 (RemoteInput Bundle 시뮬레이션): chat_id={chat_id}, message={message_text[:50]}...")
+                print(f"[참고] 실제 카카오톡 전송 여부는 카카오톡에서 확인 필요")
+                return True
+            else:
+                print(f"[정보] RemoteInput Bundle 시뮬레이션 실패: returncode={result.returncode}, stderr={result.stderr}")
+        except Exception as e:
+            print(f"[정보] RemoteInput Bundle 시뮬레이션 오류: {e}")
+        
+        # 방법 3-2: 다른 키 이름 시도 (카카오톡이 사용할 수 있는 다른 키)
+        try:
+            cmd_remote2 = [
+                "am", "startservice",
+                "-n", "com.kakao.talk/.notification.NotificationActionService",
+                "-a", "com.kakao.talk.notification.REPLY_MESSAGE",
+                "--es", "noti_referer", referer,
+                "--el", "chat_id", str(chat_id),
+                "--ez", "is_chat_thread_notification", "false",  # Boolean (Iris 원본 코드 참고)
+                "--es", "android.support.remoteinput.results", json.dumps({"reply_message": message_text}),
+                "--es", "reply_message", message_text
+            ]
+            
+            result = subprocess.run(
+                cmd_remote2,
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode == 0 and (not result.stderr or ("Error" not in result.stderr and "error" not in result.stderr.lower())):
+                print(f"[정보] am startservice 명령어 실행 성공 (대체 RemoteInput 키): chat_id={chat_id}, message={message_text[:50]}...")
+                print(f"[참고] 실제 카카오톡 전송 여부는 카카오톡에서 확인 필요")
+                return True
+            else:
+                print(f"[정보] 대체 RemoteInput 키 방식 실패: returncode={result.returncode}, stderr={result.stderr}")
+        except Exception as e:
+            print(f"[정보] 대체 RemoteInput 키 방식 오류: {e}")
         
         # 방법 3: Python의 android 모듈 사용 시도 (Termux에서 가능할 수도 있음)
         # 참고: Termux는 Android 환경이므로 일부 Android API 접근 가능
@@ -997,12 +1303,21 @@ def send_to_kakaotalk(room_id, message_text):
         
         # 모든 방법 실패
         print(f"[✗] 카카오톡 전송 실패: 모든 방법 시도 완료")
-        print(f"[디버그] room_id={chat_id}, message 길이={len(message_text)}")
+        print(f"[디버그] room_id={chat_id}, 타입={type(chat_id)}, message 길이={len(message_text)}")
+        print(f"[핵심 문제] am startservice 명령어의 한계:")
+        print(f"  - RemoteInput Bundle을 직접 전달할 수 없음")
+        print(f"  - Iris는 RemoteInput.addResultsToIntent()로 Bundle을 Intent에 추가")
+        print(f"  - am startservice로는 Bundle 객체를 전달할 수 없어 카카오톡이 메시지를 인식하지 못함")
+        print(f"[Iris 원본 코드 분석]")
+        print(f"  1. Bundle().putCharSequence(\"reply_message\", msg)")
+        print(f"  2. RemoteInput.addResultsToIntent()로 Bundle 추가")
+        print(f"  3. AndroidHiddenApi.startService(intent) 호출")
         print(f"[정보] 해결 방법:")
-        print(f"  1. Termux 환경에서 실행 중인지 확인")
-        print(f"  2. 카카오톡이 실행 중인지 확인")
-        print(f"  3. 하율 패치가 제대로 적용되었는지 확인")
-        print(f"  4. 로그 확인: logcat | grep -i kakao")
+        print(f"  1. Android 앱을 통해 직접 Intent 생성 (Iris 방식)")
+        print(f"  2. 또는 카카오톡이 일반 Extra도 인식하는지 확인")
+        print(f"  3. logcat으로 카카오톡 로그 확인: logcat | grep -i kakao")
+        print(f"  4. chat_id 확인: {chat_id} (Iris는 Long 타입 사용)")
+        print(f"[참고] Python에서는 am startservice만 사용 가능하여 RemoteInput Bundle 전달 불가")
         
         return False
         
@@ -1018,10 +1333,111 @@ def send_to_server(message_data):
     
     try:
         # room과 sender를 문자열로 변환 (서버가 문자열을 기대함)
-        room = str(message_data.get("chat_id", ""))
+        chat_id = message_data.get("chat_id", "")
+        
+        # chat_id 원본 값 저장 (디버그용)
+        chat_id_original = chat_id
+        
+        # chat_id가 문자열이면 숫자로 변환 시도 (큰 숫자 처리)
+        if isinstance(chat_id, str) and chat_id.isdigit():
+            try:
+                chat_id = int(chat_id)
+            except (ValueError, OverflowError) as e:
+                print(f"[경고] chat_id 숫자 변환 실패: {chat_id}, 오류: {e}")
+                chat_id = chat_id_original  # 원본 유지
+        elif not isinstance(chat_id, (int, str)) or (isinstance(chat_id, str) and not chat_id.isdigit()):
+            print(f"[경고] 잘못된 chat_id 타입: {type(chat_id)}, 값: {chat_id}")
+            chat_id = ""
+        
+        # chat_id 변환 후 확인 (디버그)
+        if chat_id_original != chat_id:
+            print(f"[디버그] chat_id 변환: {chat_id_original} ({type(chat_id_original)}) -> {chat_id} ({type(chat_id)})")
+        
+        room_id = str(chat_id) if chat_id else ""
+        
         sender = str(message_data.get("user_id", ""))
         message = str(message_data.get("message", ""))
         v_field = message_data.get("v")
+        
+        # 채팅방 데이터 조회 및 복호화
+        room_data = get_chat_room_data(chat_id) if chat_id else None
+        room_name_raw = room_data.get('name') if room_data else None
+        room_name_column = room_data.get('name_column') if room_data else None
+        
+        # 채팅방 이름 복호화 시도
+        room_name_decrypted = None
+        room_name_encrypted = None
+        
+        if room_name_raw:
+            print(f"[채팅방] 이름 조회 성공: chat_id={chat_id}, 길이={len(room_name_raw) if isinstance(room_name_raw, str) else 'N/A'}")
+            
+            # base64로 보이는 경우 암호화된 것으로 간주
+            is_base64_like = (isinstance(room_name_raw, str) and 
+                             len(room_name_raw) > 10 and 
+                             len(room_name_raw) % 4 == 0 and
+                             all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in room_name_raw))
+            
+            if is_base64_like and KAKAODECRYPT_AVAILABLE and MY_USER_ID:
+                print(f"[채팅방] 암호화된 이름 확인, 복호화 시도: chat_id={chat_id}")
+                # enc 후보 추출
+                enc_type_room = 31
+                if v_field:
+                    try:
+                        if isinstance(v_field, str):
+                            v_parsed = json.loads(v_field)
+                            if isinstance(v_parsed, dict) and "enc" in v_parsed:
+                                enc_type_room = v_parsed["enc"] or 31
+                    except:
+                        pass
+                
+                # private_meta에서 enc 정보 확인
+                if room_data and room_data.get('raw_data'):
+                    raw_data = room_data.get('raw_data')
+                    if 'private_meta_parsed' in raw_data:
+                        private_meta = raw_data.get('private_meta_parsed')
+                        if isinstance(private_meta, dict) and 'enc' in private_meta:
+                            enc_type_room = private_meta['enc'] or 31
+                
+                # 복호화 시도
+                enc_candidates = [enc_type_room, 31, 30]
+                enc_candidates = list(dict.fromkeys(enc_candidates))
+                
+                for enc_try in enc_candidates:
+                    try:
+                        decrypt_user_id_int = int(MY_USER_ID)
+                        if decrypt_user_id_int > 0:
+                            decrypted = KakaoDecrypt.decrypt(decrypt_user_id_int, enc_try, room_name_raw)
+                            if decrypted and decrypted != room_name_raw:
+                                # 유효한 텍스트인지 확인
+                                has_control_chars = any(ord(c) < 32 and c not in '\n\r\t' for c in decrypted)
+                                if not has_control_chars:
+                                    room_name_decrypted = decrypted
+                                    room_name_encrypted = room_name_raw
+                                    print(f"[✓ 채팅방] 복호화 성공: \"{decrypted}\" (enc={enc_try})")
+                                    break
+                    except Exception as e:
+                        continue
+                
+                if not room_name_decrypted:
+                    room_name_encrypted = room_name_raw
+                    print(f"[✗ 채팅방] 복호화 실패: 서버로 암호화된 원본 전송")
+            else:
+                # 암호화되지 않은 일반 텍스트인 경우
+                room_name_decrypted = room_name_raw
+                print(f"[채팅방] 일반 텍스트: \"{room_name_raw}\"")
+        else:
+            print(f"[채팅방] 이름 조회 실패: chat_id={chat_id}")
+        
+        # 서버로 전송할 room 값 결정
+        if room_name_decrypted:
+            room = room_name_decrypted
+            print(f"[전송] room 값: 복호화된 이름=\"{room}\"")
+        elif room_name_encrypted:
+            room = room_name_encrypted
+            print(f"[전송] room 값: 암호화된 이름 (서버에서 복호화 시도)")
+        else:
+            room = room_id
+            print(f"[전송] room 값: ID=\"{room}\"")
         
         # 빈 메시지는 전송하지 않음
         if not message or message.strip() == "":
@@ -1060,17 +1476,31 @@ def send_to_server(message_data):
         
         # 마지막 메시지의 room 정보 저장 (서버 응답에 room이 없을 때 사용)
         last_message_room = room
+        last_message_chat_id = chat_id  # chat_id도 저장 (숫자)
+        
+        # chat_id 타입 및 값 확인 (디버그)
+        print(f"[전송 전] chat_id 값: {chat_id}, 타입: {type(chat_id)}, message_data.chat_id: {message_data.get('chat_id')}")
         
         # 서버가 기대하는 형식 (IrisLink 형식)
         # 서버 코드를 보면 "message" 필드를 기대함
         payload = {
             "type": "message",
-            "room": room,
+            "room": room,  # 복호화된 채팅방 이름 또는 암호화된 이름 또는 ID
             "sender": sender,
             "message": final_message,  # 복호화된 메시지 또는 원본
             "isGroupChat": True,  # 명시적으로 추가
-            "json": message_data  # 원본 데이터도 포함
+            "json": {
+                **message_data,  # 원본 메시지 데이터
+                "chat_id": str(chat_id),  # chat_id를 문자열로 전송 (큰 숫자 손실 방지)
+                "room_name": room_name_encrypted if room_name_encrypted else room_name_raw,  # 암호화된 채팅방 이름 (서버 복호화용)
+                "room_name_decrypted": room_name_decrypted,  # 클라이언트에서 복호화한 이름
+                "room_name_column": room_name_column,  # 채팅방 이름 컬럼명
+                "room_data": room_data.get('raw_data') if room_data else None  # 채팅방 원본 데이터
+            }
         }
+        
+        # payload의 chat_id 확인 (디버그)
+        print(f"[전송 전] payload.json.chat_id: {payload['json']['chat_id']}, 타입: {type(payload['json']['chat_id'])}")
         
         # WebSocket 연결 확인
         if ws_connection is None:
@@ -1079,21 +1509,21 @@ def send_to_server(message_data):
                 print("[✗] WebSocket 재연결 실패")
                 return False
         
-        # WebSocket 연결 상태 상세 확인
+        # WebSocket 연결 상태 확인
         if ws_connection:
             sock_connected = ws_connection.sock and ws_connection.sock.connected if ws_connection.sock else False
-            print(f"[디버그] WebSocket 상태: ws_connection={ws_connection is not None}, sock={ws_connection.sock is not None if ws_connection else None}, connected={sock_connected}")
+            print(f"[전송] WebSocket 상태: 연결={sock_connected}, payload 길이={len(json.dumps(payload))}")
         else:
-            print("[디버그] WebSocket 상태: ws_connection=None")
+            print("[전송] WebSocket 상태: 연결 없음")
         
         # WebSocket으로 메시지 전송
         with ws_lock:
             if ws_connection and ws_connection.sock and ws_connection.sock.connected:
                 try:
                     payload_str = json.dumps(payload, ensure_ascii=False)
-                    print(f"[디버그] WebSocket 전송 시도: payload 길이={len(payload_str)}, type={payload.get('type')}")
+                    print(f"[전송] WebSocket 전송: room=\"{room}\", sender={sender}, message 길이={len(final_message)}")
                     ws_connection.send(payload_str)
-                    print(f"[✓] WebSocket 전송 성공")
+                    print(f"[✓] 전송 성공")
                     return True
                 except Exception as e:
                     print(f"[✗] WebSocket 전송 오류: {e}")
@@ -1419,7 +1849,6 @@ def poll_messages():
                             print(f"  - 전송할 message_data.myUserId: {MY_USER_ID}")
                         
                         # 서버로 전송
-                        print(f"[전송 시도] 메시지 ID={msg_id}, 내용 길이={len(final_message)}, room={chat_id}")
                         if send_to_server(message_data):
                             sent_count += 1
                             # 전송 성공한 메시지는 sent_message_ids에 추가 (이미 추가되어 있지만 확실히)

@@ -964,28 +964,198 @@ wss.on('connection', function connection(ws, req) {
           }
         }
         
+        // ========== 채팅방 이름 복호화 및 필터링 ==========
+        let decryptedRoomName = room;
+        const TARGET_ROOM_NAME = '의운모';
+        
+        console.log(`[채팅방 필터링] 시작: room="${room}", 타입=${typeof room}`);
+        
+        // 클라이언트에서 이미 복호화한 이름이 있으면 우선 사용
+        if (json && json.room_name_decrypted) {
+          decryptedRoomName = json.room_name_decrypted;
+          console.log(`[채팅방 이름] 클라이언트에서 복호화된 이름 사용: "${decryptedRoomName}"`);
+        }
+        // json 필드에서 채팅방 이름 정보 확인 (암호화된 경우 복호화 시도)
+        else if (json && json.room_name) {
+          const roomNameRaw = json.room_name;
+          
+          // base64로 보이는 경우 복호화 시도
+          const isBase64Like = typeof roomNameRaw === 'string' && 
+                               roomNameRaw.length > 10 && 
+                               roomNameRaw.length % 4 == 0 &&
+                               /^[A-Za-z0-9+/=]+$/.test(roomNameRaw);
+          
+          if (isBase64Like) {
+            console.log(`[채팅방 이름 복호화] 시도: room_name 길이=${roomNameRaw.length}`);
+            
+            // enc 후보: private_meta에서 추출 시도
+            let enc = 31; // 기본값
+            
+            // room_data에서 private_meta 확인
+            if (json.room_data && json.room_data.private_meta) {
+              try {
+                const privateMetaStr = typeof json.room_data.private_meta === 'string' 
+                  ? json.room_data.private_meta 
+                  : JSON.stringify(json.room_data.private_meta);
+                const privateMeta = JSON.parse(privateMetaStr);
+                if (privateMeta && typeof privateMeta === 'object' && privateMeta.enc !== undefined) {
+                  enc = Number(privateMeta.enc) || 31;
+                  console.log(`[채팅방 이름 복호화] private_meta에서 enc 추출: ${enc}`);
+                }
+              } catch (e) {
+                // 무시
+              }
+            }
+            
+            // v 필드에서 enc 추출
+            if (json.v) {
+              try {
+                const vParsed = typeof json.v === 'string' ? JSON.parse(json.v) : json.v;
+                if (vParsed && typeof vParsed === 'object' && vParsed.enc !== undefined) {
+                  enc = Number(vParsed.enc) || 31;
+                  console.log(`[채팅방 이름 복호화] v 필드에서 enc 추출: ${enc}`);
+                }
+              } catch (e) {
+                // 무시
+              }
+            }
+            
+            // userId 후보: myUserId 우선 (채팅방 이름은 자신의 user_id로 복호화)
+            const myUserId = json.myUserId;
+            const senderUserId = json.userId || json.user_id;
+            
+            const userCandidates = [];
+            if (myUserId) userCandidates.push(String(myUserId));
+            if (senderUserId && senderUserId !== myUserId) userCandidates.push(String(senderUserId));
+            
+            const encCandidates = [enc, 31, 30]; // 32 제거 (잘못된 enc 값)
+            const encUnique = Array.from(new Set(encCandidates));
+            
+            console.log(`[채팅방 이름 복호화] user_id 후보: ${userCandidates}, enc 후보: ${encUnique}`);
+            
+            let decryptedRoomFound = null;
+            for (const uid of userCandidates) {
+              for (const encTry of encUnique) {
+                try {
+                  const d = decryptKakaoTalkMessage(roomNameRaw, String(uid), Number(encTry));
+                  if (d && d.length > 0) {
+                    // 복호화 성공 시 유효한 텍스트인지 확인
+                    const hasControlChars = /[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(d);
+                    if (!hasControlChars) {
+                      decryptedRoomFound = d;
+                      console.log(`[✓ 채팅방 이름 복호화 성공] user_id=${uid}, enc=${encTry}, 이름="${d}"`);
+                      break;
+                    }
+                  }
+                } catch (e) {
+                  // 복호화 실패는 무시하고 다음 시도
+                }
+              }
+              if (decryptedRoomFound) break;
+            }
+            
+            if (decryptedRoomFound) {
+              decryptedRoomName = decryptedRoomFound;
+            } else {
+              console.log(`[✗ 채팅방 이름 복호화 실패] 모든 시도 실패, 원본 사용: "${roomNameRaw}"`);
+            }
+          } else {
+            console.log(`[채팅방 이름] base64 형태가 아님: "${roomNameRaw}"`);
+          }
+        } else {
+          console.log(`[채팅방 이름] json.room_name 없음, room 파라미터 사용: "${room}"`);
+        }
+        
+        console.log(`[채팅방 필터링] 최종 room 이름: "${decryptedRoomName}"`);
+        
+        // "의운모" 채팅방인지 확인
+        const isTargetRoom = decryptedRoomName === TARGET_ROOM_NAME || 
+                            (typeof decryptedRoomName === 'string' && decryptedRoomName.indexOf(TARGET_ROOM_NAME) !== -1) ||
+                            (typeof TARGET_ROOM_NAME === 'string' && TARGET_ROOM_NAME.indexOf(decryptedRoomName) !== -1);
+        
+        if (!isTargetRoom) {
+          console.log(`[필터링] 채팅방 "${decryptedRoomName}"은(는) "${TARGET_ROOM_NAME}"이 아니므로 응답하지 않습니다.`);
+          console.log(`[필터링 디버그] json.room_name_decrypted="${json?.room_name_decrypted}", json.room_name="${json?.room_name}", room="${room}"`);
+          ws.send(JSON.stringify({
+            type: 'reply',
+            replies: []  // 빈 응답
+          }));
+          return;
+        }
+        
         console.log(`[${new Date().toISOString()}] WS 메시지 수신 (IrisLink):`, {
-          room,
+          room: decryptedRoomName,
           sender,
           message: decryptedMessage?.substring(0, 50) + (decryptedMessage?.length > 50 ? '...' : ''),
           isGroupChat: isGroupChat !== undefined ? isGroupChat : true
         });
 
         const replies = handleMessage(
-          room || '',
+          decryptedRoomName || '',
           decryptedMessage || '',
           sender || '',
           isGroupChat !== undefined ? isGroupChat : true
         );
+
+        // chat_id 추출 (클라이언트에서 숫자로 변환 가능하도록)
+        // json.chat_id가 있으면 사용 (클라이언트에서 명시적으로 전송한 값)
+        let chatId = json?.chat_id;
+        
+        // 디버그: chat_id 추출 과정 확인
+        console.log(`[응답 생성] chat_id 추출: json.chat_id=${json?.chat_id}, 타입=${typeof json?.chat_id}`);
+        
+        // chat_id를 문자열로 유지 (큰 숫자 손실 방지)
+        // JavaScript Number는 64비트 부동소수점이므로 큰 정수는 정확도 손실 가능
+        // 따라서 문자열로 전달하고, 필요시에만 숫자로 변환
+        if (chatId) {
+          if (typeof chatId === 'string' && /^\d+$/.test(chatId)) {
+            // 문자열로 유지 (큰 숫자 정확도 보장)
+            console.log(`[응답 생성] chat_id 문자열 유지: ${chatId}`);
+            // 숫자로 변환은 클라이언트에서 수행
+          } else if (typeof chatId === 'number') {
+            // 숫자로 받은 경우 문자열로 변환 (큰 숫자 손실 방지)
+            chatId = String(chatId);
+            console.log(`[응답 생성] chat_id 숫자를 문자열로 변환: ${chatId}`);
+          } else {
+            console.log(`[경고] chat_id가 유효하지 않음: ${chatId}, 타입=${typeof chatId}`);
+            chatId = null;
+          }
+        }
+        
+        if (!chatId) {
+          console.log(`[응답 생성] json.chat_id 없음, room 확인: room="${room}", 타입=${typeof room}`);
+          // room이 숫자인지 확인 (원본 chat_id일 수 있음)
+          // 문자열로 유지 (큰 숫자 정확도 보장)
+          if (typeof room === 'string' && /^\d+$/.test(room)) {
+            chatId = room;  // 문자열로 유지
+            console.log(`[응답 생성] room에서 chat_id 추출 (문자열): ${chatId}`);
+          } else if (typeof room === 'number') {
+            chatId = String(room);  // 숫자를 문자열로 변환
+            console.log(`[응답 생성] room에서 chat_id 추출 (숫자→문자열): ${chatId}`);
+          }
+        }
+        
+        console.log(`[응답 생성] replies 개수: ${replies.length}, 최종 chat_id: ${chatId}, room: "${decryptedRoomName}"`);
+        
+        if (replies.length === 0) {
+          console.log(`[응답 생성] 빈 응답 배열, 전송하지 않음`);
+          ws.send(JSON.stringify({
+            type: 'reply',
+            replies: []
+          }));
+          return;
+        }
 
         ws.send(JSON.stringify({
           type: 'reply',
           replies: replies.map(text => ({
             type: 'text',
             text: text,
-            room: room
+            room: decryptedRoomName,  // 복호화된 채팅방 이름
+            chat_id: chatId  // 숫자 chat_id 추가 (클라이언트에서 사용)
           }))
         }));
+        console.log(`[응답 전송] ${replies.length}개 응답 전송 완료, chat_id: ${chatId}`);
         return;
       }
 
