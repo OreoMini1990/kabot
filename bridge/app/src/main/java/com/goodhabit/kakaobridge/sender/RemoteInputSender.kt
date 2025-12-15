@@ -34,19 +34,39 @@ class RemoteInputSender(
         // roomKey 정규화 (알림에서 추출한 roomKey와 매칭하기 위해)
         val normalizedRoomKey = roomKey.trim()
 
-        // 1. roomKey에 대한 replyAction 캐시 조회
+        // 1. roomKey에 대한 replyAction 캐시 조회 및 유효성 검증
+        // 캐시 유효성 검증 (2시간 TTL)
+        val isCacheValid = notificationCache.isCacheValid(normalizedRoomKey, maxAgeMs = 7200000)
         val cachedAction = notificationCache.getReplyAction(normalizedRoomKey)
-        if (cachedAction == null) {
+        
+        if (cachedAction == null || !isCacheValid) {
             val availableKeys = notificationCache.getAllCachedRoomKeys()
-            Log.w(TAG, "✗ No cached replyAction for roomKey: \"$normalizedRoomKey\"")
+            val cacheInfo = notificationCache.getCacheInfo()
+            
+            Log.w(TAG, "✗ No valid cached replyAction for roomKey: \"$normalizedRoomKey\"")
+            Log.w(TAG, "  Cache exists: ${cachedAction != null}")
+            Log.w(TAG, "  Cache valid: $isCacheValid")
             Log.w(TAG, "  Available cached roomKeys (${availableKeys.size}):")
             availableKeys.forEach { key ->
-                Log.w(TAG, "    - \"$key\"")
+                val keyCacheInfo = notificationCache.getCacheInfo()
+                val keyValid = notificationCache.isCacheValid(key)
+                Log.w(TAG, "    - \"$key\" (valid: $keyValid)")
             }
-            Log.w(TAG, "  → roomKey 매칭 실패! 서버에서 보낸 roomKey와 알림에서 추출한 roomKey가 일치하지 않습니다.")
+            
+            // 캐시 상세 정보 로깅
+            Log.w(TAG, "  Cache details:")
+            val entries = cacheInfo["entries"] as? List<Map<String, Any>>
+            entries?.forEach { entry ->
+                Log.w(TAG, "    roomKey: ${entry["roomKey"]}, age: ${entry["ageSeconds"]}s, valid: ${entry["isValid"]}")
+            }
+            
+            Log.w(TAG, "  → roomKey 매칭 실패 또는 캐시 만료! 서버에서 보낸 roomKey와 알림에서 추출한 roomKey가 일치하지 않거나 캐시가 만료되었습니다.")
             Log.w(TAG, "  → 해결 방법: 해당 채팅방으로 메시지를 받아서 알림을 생성하거나, roomKey를 정확히 일치시켜야 합니다.")
-            return SendResult.WaitingNotification("채팅방 '$normalizedRoomKey'에 대한 알림이 없습니다. 카카오톡에서 해당 채팅방으로 메시지를 받으면 자동으로 전송됩니다.")
+            return SendResult.WaitingNotification("채팅방 '$normalizedRoomKey'에 대한 알림이 없거나 캐시가 만료되었습니다. 카카오톡에서 해당 채팅방으로 메시지를 받으면 자동으로 전송됩니다.")
         }
+        
+        // 캐시 유효성 확인 로그
+        Log.d(TAG, "✓ Cache validated for roomKey: \"$normalizedRoomKey\"")
 
         val (pendingIntent, remoteInputs) = cachedAction
         Log.d(TAG, "✓ Found cached replyAction")

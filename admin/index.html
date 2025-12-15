@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KakaoBot 관리자 패널</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤖 KakaoBot 관리자 패널</h1>
+            <div class="auth-section">
+                <input type="password" id="adminToken" placeholder="관리자 토큰 입력" />
+                <button onclick="setToken()">인증</button>
+                <span id="authStatus" class="status"></span>
+            </div>
+        </header>
+
+        <nav class="tabs">
+            <button class="tab-btn active" onclick="showTab('profanity')">비속어 필터</button>
+            <button class="tab-btn" onclick="showTab('notices')">공지 관리</button>
+            <button class="tab-btn" onclick="showTab('logs')">로그 조회</button>
+        </nav>
+
+        <!-- 비속어 필터 탭 -->
+        <div id="profanity-tab" class="tab-content active">
+            <div class="section-header">
+                <h2>비속어 필터 관리</h2>
+                <button class="btn-primary" onclick="showAddProfanityModal()">+ 추가</button>
+            </div>
+            
+            <div class="filter-tabs">
+                <button class="filter-btn active" onclick="filterProfanity('all')">전체</button>
+                <button class="filter-btn" onclick="filterProfanity('profanity')">비속어</button>
+                <button class="filter-btn" onclick="filterProfanity('job_discrimination')">타직업 비하</button>
+            </div>
+
+            <div class="table-container">
+                <table id="profanity-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>단어</th>
+                            <th>타입</th>
+                            <th>생성일</th>
+                            <th>작업</th>
+                        </tr>
+                    </thead>
+                    <tbody id="profanity-tbody">
+                        <tr><td colspan="5" class="loading">로딩 중...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 공지 관리 탭 -->
+        <div id="notices-tab" class="tab-content">
+            <div class="section-header">
+                <h2>공지 관리</h2>
+                <button class="btn-primary" onclick="showAddNoticeModal()">+ 추가</button>
+            </div>
+
+            <div class="table-container">
+                <table id="notices-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>내용</th>
+                            <th>만료일</th>
+                            <th>스케줄</th>
+                            <th>상태</th>
+                            <th>작업</th>
+                        </tr>
+                    </thead>
+                    <tbody id="notices-tbody">
+                        <tr><td colspan="6" class="loading">로딩 중...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- 로그 조회 탭 -->
+        <div id="logs-tab" class="tab-content">
+            <div class="section-header">
+                <h2>로그 조회</h2>
+            </div>
+
+            <div class="log-tabs">
+                <button class="log-btn active" onclick="showLogTab('filter')">필터 로그</button>
+                <button class="log-btn" onclick="showLogTab('warnings')">경고 기록</button>
+            </div>
+
+            <div id="filter-logs" class="log-content">
+                <div class="table-container">
+                    <table id="filter-logs-table">
+                        <thead>
+                            <tr>
+                                <th>시간</th>
+                                <th>발신자</th>
+                                <th>메시지</th>
+                                <th>사유</th>
+                                <th>단어</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="filter-logs-tbody">
+                            <tr><td colspan="6" class="loading">로딩 중...</td></tr>
+                        </tbody>
+                    </table>
+                    <div style="margin-top: 10px;">
+                        <button class="btn-danger" onclick="deleteAllFilterLogs()">전체 삭제</button>
+                    </div>
+                    </table>
+                </div>
+            </div>
+
+            <div id="warnings-logs" class="log-content" style="display: none;">
+                <div class="table-container">
+                    <table id="warnings-table">
+                        <thead>
+                            <tr>
+                                <th>발신자</th>
+                                <th>경고 횟수</th>
+                                <th>마지막 경고</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="warnings-tbody">
+                            <tr><td colspan="4" class="loading">로딩 중...</td></tr>
+                        </tbody>
+                    </table>
+                    <div style="margin-top: 10px;">
+                        <button class="btn-danger" onclick="deleteAllWarnings()">전체 삭제</button>
+                    </div>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 모달: 비속어 추가/수정 -->
+    <div id="profanity-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('profanity-modal')">&times;</span>
+            <h2 id="profanity-modal-title">비속어 추가</h2>
+            <form id="profanity-form" onsubmit="saveProfanity(event)">
+                <input type="hidden" id="profanity-id" />
+                <div class="form-group">
+                    <label>단어</label>
+                    <input type="text" id="profanity-word" required />
+                </div>
+                <div class="form-group">
+                    <label>타입</label>
+                    <select id="profanity-type" required>
+                        <option value="profanity">비속어</option>
+                        <option value="job_discrimination">타직업 비하</option>
+                    </select>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">저장</button>
+                    <button type="button" class="btn-secondary" onclick="closeModal('profanity-modal')">취소</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 모달: 공지 추가/수정 -->
+    <div id="notice-modal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('notice-modal')">&times;</span>
+            <h2 id="notice-modal-title">공지 추가</h2>
+            <form id="notice-form" onsubmit="saveNotice(event)">
+                <input type="hidden" id="notice-id" />
+                <div class="form-group">
+                    <label>내용</label>
+                    <textarea id="notice-content" rows="5" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label>만료일 (YYYY-MM-DD, 선택사항)</label>
+                    <input type="date" id="notice-expiry" />
+                </div>
+                <div class="form-group">
+                    <label>스케줄 시간 (쉼표로 구분, 예: 09:00,13:00,20:00)</label>
+                    <input type="text" id="notice-schedule" placeholder="09:00,13:00,20:00" />
+                </div>
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="notice-enabled" checked />
+                        활성화
+                    </label>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary">저장</button>
+                    <button type="button" class="btn-secondary" onclick="closeModal('notice-modal')">취소</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
+

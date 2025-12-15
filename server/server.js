@@ -11,7 +11,25 @@ const WebSocket = require('ws');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { handleMessage } = require('./labbot-node');
+const { handleMessage, NOTICE_SYSTEM, CONFIG } = require('./labbot-node');
+
+// 단축 URL 전송 함수 (전역으로 export하여 labbot-node.js에서 사용 가능하도록)
+let sendShortUrlMessageFunction = null;
+function setSendShortUrlMessageFunction(fn) {
+    sendShortUrlMessageFunction = fn;
+}
+
+// 후속 메시지 전송 함수 (네이버 카페 API 호출 완료 후 결과 전송용)
+let sendFollowUpMessageFunction = null;
+function setSendFollowUpMessageFunction(fn) {
+    sendFollowUpMessageFunction = fn;
+}
+
+// CONFIG의 ROOM_KEY가 없으면 ROOM_NAME 사용 (하위 호환성)
+if (!CONFIG.ROOM_KEY) {
+    CONFIG.ROOM_KEY = CONFIG.ROOM_NAME;
+}
+const adminRouter = require('./api/admin');
 
 const PORT = Number(process.env.PORT || 5002);
 const BOT_ID = process.env.BOT_ID || 'iris-core';
@@ -150,6 +168,79 @@ const app = express();
 
 // JSON 파싱 미들웨어
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// 정적 파일 서빙 (관리자 패널)
+// __dirname이 server 디렉토리이므로, 프로젝트 루트를 찾기 위해 상위 디렉토리로 이동
+const projectRoot = path.join(__dirname, '..');
+const adminPath = path.join(projectRoot, 'admin');
+
+// 디렉토리 존재 여부 확인
+if (!fs.existsSync(adminPath)) {
+  console.error(`[경고] 관리자 패널 경로를 찾을 수 없습니다: ${adminPath}`);
+}
+
+app.use('/admin', express.static(adminPath));
+
+// 관리자 페이지 라우트 (index.html 자동 서빙)
+app.get('/admin', (req, res) => {
+  const indexPath = path.join(adminPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).json({ 
+      ok: false, 
+      error: 'Admin panel not found',
+      path: indexPath,
+      hint: 'Please check if admin/index.html exists'
+    });
+  }
+});
+
+// 관리자 API
+app.use('/api/admin', adminRouter);
+
+// 네이버 OAuth API (선택적 로딩)
+try {
+    const naverOAuthRouter = require('./api/naverOAuth');
+    app.use('/api/naver/oauth', naverOAuthRouter);
+    console.log('[서버] 네이버 OAuth 라우터 로드 완료');
+} catch (error) {
+    console.warn('[서버] 네이버 OAuth 라우터 로드 실패:', error.message);
+    console.warn('[서버] OAuth 기능은 사용할 수 없습니다. server/api/naverOAuth.js 파일을 확인하세요.');
+}
+
+// ========== 네이버 카페 짧은 링크 리다이렉트 ==========
+app.get('/go/:code', async (req, res) => {
+    try {
+        const { code } = req.params;
+        const db = require('./db/database');
+        
+        // DB에서 short_code로 조회
+        const query = 'SELECT article_url, status FROM naver_cafe_posts WHERE short_code = ? LIMIT 1';
+        const result = await db.prepare(query).get(code);
+        
+        if (result && result.article_url) {
+            // 리다이렉트
+            res.redirect(302, result.article_url);
+        } else {
+            // 404 페이지
+            res.status(404).send(`
+                <html>
+                    <head><title>링크를 찾을 수 없습니다</title></head>
+                    <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+                        <h1>404 - 링크를 찾을 수 없습니다</h1>
+                        <p>요청하신 링크가 존재하지 않거나 만료되었습니다.</p>
+                        <p><a href="/admin">관리자 페이지로 돌아가기</a></p>
+                    </body>
+                </html>
+            `);
+        }
+    } catch (error) {
+        console.error('[shortlink] 리다이렉트 오류:', error);
+        res.status(500).send('Internal Server Error');
+    }
+});
 
 // HTTP 요청 로깅 미들웨어 (모든 요청)
 app.use((req, res, next) => {
@@ -775,6 +866,161 @@ wss = new WebSocket.Server({
   perMessageDeflate: false
 });
 
+// 단축 URL 전송 함수 등록 (WebSocket 서버 생성 후)
+setSendShortUrlMessageFunction((roomKey, shortUrl, title) => {
+  const fixedRoomKey = CONFIG.ROOM_KEY || roomKey || '';
+  const updateMessage = {
+    type: 'send',
+    id: `shorturl-${Date.now()}`,
+    roomKey: fixedRoomKey,
+    text: `🔗 단축 링크가 생성되었습니다!\n\n답변하러가기: ${shortUrl}`,
+    ts: Math.floor(Date.now() / 1000)
+  };
+  
+  let sentCount = 0;
+  if (wss && wss.clients) {
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(JSON.stringify(updateMessage));
+          sentCount++;
+          break; // 첫 번째 Bridge APK에게만 전송
+        } catch (err) {
+          console.error(`[단축 URL 전송] 오류:`, err.message);
+        }
+      }
+    }
+  }
+  console.log(`[단축 URL 전송] 완료: ${shortUrl}, 전송=${sentCount}개`);
+});
+
+// 후속 메시지 전송 함수 등록 (네이버 카페 API 호출 완료 후 결과 전송용)
+// 주의: 이 함수는 나중에 정의되는 getRoomKeyFromCache를 사용하므로,
+// 실제 호출 시점에는 이미 정의되어 있어야 함
+setSendFollowUpMessageFunction((roomKey, message) => {
+  console.log(`[후속 메시지 전송] 요청 수신: roomKey="${roomKey}", message="${message.substring(0, 50)}..."`);
+  
+  // roomKey 캐시에서 최신 roomKey 가져오기 (함수가 정의된 후 호출되므로 안전)
+  let cachedRoomKey = roomKey || CONFIG.ROOM_KEY || '';
+  
+  // getRoomKeyFromCache가 정의되어 있으면 사용
+  if (typeof getRoomKeyFromCache === 'function') {
+    const cached = getRoomKeyFromCache(roomKey);
+    if (cached) {
+      cachedRoomKey = cached;
+      console.log(`[후속 메시지 전송] 캐시에서 roomKey 찾음: "${cachedRoomKey}" (원본: "${roomKey}")`);
+    } else {
+      console.log(`[후속 메시지 전송] 캐시에서 roomKey를 찾지 못함, 원본 사용: "${cachedRoomKey}"`);
+      
+      // roomKey가 없으면 CONFIG.ROOM_KEY 사용
+      if (!cachedRoomKey) {
+        cachedRoomKey = CONFIG.ROOM_KEY || '';
+        console.log(`[후속 메시지 전송] CONFIG.ROOM_KEY 사용: "${cachedRoomKey}"`);
+      }
+    }
+  } else {
+    console.log(`[후속 메시지 전송] getRoomKeyFromCache 함수가 아직 정의되지 않음, 원본 사용: "${cachedRoomKey}"`);
+    // CONFIG.ROOM_KEY를 fallback으로 사용
+    if (!cachedRoomKey) {
+      cachedRoomKey = CONFIG.ROOM_KEY || '';
+      console.log(`[후속 메시지 전송] CONFIG.ROOM_KEY 사용: "${cachedRoomKey}"`);
+    }
+  }
+  
+  // 최종 확인: roomKey가 비어있으면 CONFIG.ROOM_KEY 사용
+  if (!cachedRoomKey) {
+    cachedRoomKey = CONFIG.ROOM_KEY || '';
+    console.log(`[후속 메시지 전송] 최종 fallback: CONFIG.ROOM_KEY="${cachedRoomKey}"`);
+  }
+  
+  const followUpMessage = {
+    type: 'send',
+    id: `followup-${Date.now()}`,
+    roomKey: cachedRoomKey,
+    text: message,
+    ts: Math.floor(Date.now() / 1000)
+  };
+  
+  console.log(`[후속 메시지 전송] 메시지 생성: roomKey="${cachedRoomKey}", id="${followUpMessage.id}", text="${message.substring(0, 30)}..."`);
+  
+  let sentCount = 0;
+  if (wss && wss.clients) {
+    const clientsArray = Array.from(wss.clients);
+    console.log(`[후속 메시지 전송] 연결된 클라이언트 수: ${clientsArray.length}`);
+    
+    for (const client of clientsArray) {
+      if (client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(JSON.stringify(followUpMessage));
+          sentCount++;
+          console.log(`[후속 메시지 전송] Bridge APK에 전송 성공: roomKey="${cachedRoomKey}", client=${client.readyState}`);
+          // 모든 Bridge APK 클라이언트에 전송 (첫 번째만이 아닌)
+          // break; 제거하여 모든 클라이언트에 전송
+        } catch (err) {
+          console.error(`[후속 메시지 전송] 클라이언트 전송 오류:`, err.message);
+        }
+      } else {
+        console.log(`[후속 메시지 전송] 클라이언트 상태가 OPEN이 아님: ${client.readyState}`);
+      }
+    }
+  } else {
+    console.warn(`[후속 메시지 전송] WebSocket 서버 또는 클라이언트가 없음: wss=${!!wss}, clients=${wss?.clients?.size || 0}`);
+  }
+  
+  console.log(`[후속 메시지 전송] 완료: roomKey="${cachedRoomKey}", 전송=${sentCount}개`);
+  
+  // 전송 실패 시 재시도 로직 (선택사항)
+  if (sentCount === 0) {
+    console.error(`[후속 메시지 전송] 실패: 메시지가 전송되지 않았습니다. roomKey="${cachedRoomKey}"`);
+  }
+});
+
+// labbot-node.js에 함수 전달
+const { setSendShortUrlMessage, setSendFollowUpMessage } = require('./labbot-node');
+setSendShortUrlMessage(sendShortUrlMessageFunction);
+setSendFollowUpMessage(sendFollowUpMessageFunction);
+
+// 최근 메시지의 채팅방 정보 추적 (스케줄 공지 발송용)
+let recentRoomInfo = {
+    roomName: null,
+    chatId: null,
+    lastUpdate: null
+};
+
+// roomKey 캐시 (사용자가 메시지를 보낼 때 받은 roomKey 저장)
+// Bridge APK가 알림에서 캐시한 roomKey와 일치하도록 사용
+// 채팅방별로 캐시 관리 (여러 채팅방 지원)
+let roomKeyCache = new Map(); // roomName -> { roomKey, chatId, lastUpdate }
+
+// roomKey 캐시 관리 함수
+function updateRoomKeyCache(roomName, roomKey, chatId) {
+    if (roomName && roomKey) {
+        roomKeyCache.set(roomName, {
+            roomKey: roomKey,
+            chatId: chatId || null,
+            lastUpdate: new Date()
+        });
+        console.log(`[roomKey 캐시] 업데이트: roomName="${roomName}", roomKey="${roomKey}", chatId=${chatId || '없음'}`);
+    }
+}
+
+function getRoomKeyFromCache(roomName) {
+    const cached = roomKeyCache.get(roomName);
+    if (cached) {
+        // TTL 체크 (5분)
+        const ttl = 5 * 60 * 1000;
+        const age = Date.now() - cached.lastUpdate.getTime();
+        if (age < ttl) {
+            return cached.roomKey;
+        } else {
+            // TTL 만료
+            roomKeyCache.delete(roomName);
+            console.log(`[roomKey 캐시] 만료: roomName="${roomName}" (${Math.floor(age / 1000)}초 경과)`);
+        }
+    }
+    return null;
+}
+
 console.log(`[${new Date().toISOString()}] IRIS Core 시작: http://0.0.0.0:${PORT} / ws://0.0.0.0:${PORT}/ws`);
 
 // WebSocket 연결 이벤트
@@ -832,7 +1078,125 @@ wss.on('connection', function connection(ws, req) {
 
       // 2️⃣ IrisLink message 타입 처리
       if (messageData.type === 'message') {
-        const { room, sender, message, isGroupChat, json } = messageData;
+        let { room, sender, message, isGroupChat, json } = messageData;
+        
+        // 발신자 이름 처리:
+        // 1. 클라이언트에서 이미 "이름/user_id" 형식으로 보낸 경우 그대로 사용
+        // 2. sender가 암호화된 base64 문자열인 경우 복호화 시도
+        // 3. sender가 숫자만 있는 경우 json에서 이름 찾아서 "이름/user_id" 형식으로 변환
+        if (sender) {
+          // 이미 "이름/user_id" 형식이면 그대로 사용
+          if (sender.includes('/')) {
+            const parts = sender.split('/');
+            const namePart = parts[0].trim();
+            const userIdPart = parts[1];
+            
+            // 이름 부분이 암호화되어 있는지 확인 (base64로 보이는 경우)
+            const isBase64Like = namePart.length > 10 && 
+                                 namePart.length % 4 === 0 &&
+                                 /^[A-Za-z0-9+/=]+$/.test(namePart);
+            
+            if (isBase64Like && json) {
+              // 이름 부분이 암호화되어 있으면 복호화 시도
+              const myUserId = json.myUserId || json.userId || userIdPart;
+              let decryptedName = null;
+              
+              for (const encTry of [31, 30, 32]) {
+                decryptedName = decryptKakaoTalkMessage(namePart, String(myUserId), encTry);
+                if (decryptedName && decryptedName !== namePart) {
+                  const hasControlChars = /[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(decryptedName);
+                  if (!hasControlChars) {
+                    sender = `${decryptedName}/${userIdPart}`;
+                    console.log(`[발신자 복호화] 성공: "${namePart}" -> "${decryptedName}" (enc=${encTry})`);
+                    break;
+                  }
+                }
+              }
+              
+              if (!decryptedName || decryptedName === namePart) {
+                console.log(`[발신자 복호화] 실패: "${namePart}" 복호화 불가`);
+              }
+            } else {
+              console.log(`[발신자] 클라이언트에서 전송한 형식 사용: "${sender}"`);
+            }
+          } else {
+            // sender가 단일 값인 경우
+            const senderStr = String(sender).trim();
+            const isBase64Like = senderStr.length > 10 && 
+                                 senderStr.length % 4 === 0 &&
+                                 /^[A-Za-z0-9+/=]+$/.test(senderStr);
+            
+            if (isBase64Like) {
+              // 암호화된 base64 문자열로 보임 - 복호화 시도
+              console.log(`[발신자] 암호화된 문자열 감지, 복호화 시도: "${senderStr.substring(0, 20)}..."`);
+              
+              if (json) {
+                // user_id가 필요함 (Iris 방식: botId로 복호화)
+                const myUserId = json.myUserId || json.userId || json.user_id;
+                
+                if (myUserId) {
+                  let decryptedName = null;
+                  
+                  // enc 후보: 31, 30, 32 순서로 시도
+                  for (const encTry of [31, 30, 32]) {
+                    decryptedName = decryptKakaoTalkMessage(senderStr, String(myUserId), encTry);
+                    if (decryptedName && decryptedName !== senderStr) {
+                      const hasControlChars = /[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(decryptedName);
+                      if (!hasControlChars) {
+                        const userIdPart = json.user_id || json.userId || myUserId;
+                        sender = `${decryptedName}/${userIdPart}`;
+                        console.log(`[발신자 복호화] 성공: "${senderStr.substring(0, 20)}..." -> "${decryptedName}" (enc=${encTry})`);
+                        break;
+                      }
+                    }
+                  }
+                  
+                  if (!decryptedName || decryptedName === senderStr) {
+                    console.log(`[발신자 복호화] 실패: "${senderStr.substring(0, 20)}..." 복호화 불가 (myUserId=${myUserId})`);
+                  }
+                } else {
+                  console.log(`[발신자 복호화] 실패: myUserId가 없어 복호화 불가`);
+                }
+              }
+            } else if (/^\d+$/.test(senderStr)) {
+              // 숫자만 있으면 user_id로 판단, json에서 이름 찾기
+              if (json) {
+                let userName = json.user_name || json.userName || json.sender_name;
+                
+                // 암호화되어 있다면 복호화 시도
+                if (userName && typeof userName === 'string') {
+                  const userNameIsBase64 = userName.length > 10 && 
+                                           userName.length % 4 === 0 &&
+                                           /^[A-Za-z0-9+/=]+$/.test(userName);
+                  
+                  if (userNameIsBase64 && json.userId) {
+                    // 카카오톡 복호화 시도 (MY_USER_ID 사용)
+                    const myUserId = json.myUserId || json.userId;
+                    let decryptedName = null;
+                    
+                    for (const encTry of [31, 30, 32]) {
+                      decryptedName = decryptKakaoTalkMessage(userName, String(myUserId), encTry);
+                      if (decryptedName && decryptedName !== userName) {
+                        const hasControlChars = /[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(decryptedName);
+                        if (!hasControlChars) {
+                          userName = decryptedName;
+                          console.log(`[발신자 복호화] json.user_name 복호화 성공: "${userName}" (enc=${encTry})`);
+                          break;
+                        }
+                      }
+                    }
+                  }
+                }
+                
+                // 이름을 찾았으면 "이름/user_id" 형식으로 변환
+                if (userName && !/^\d+$/.test(userName)) {
+                  sender = `${userName}/${sender}`;
+                  console.log(`[발신자 파싱] 닉네임 추가: "${sender}"`);
+                }
+              }
+            }
+          }
+        }
         
         // 디버그: messageData 구조 확인
         console.log(`[디버그] messageData 구조: type=${messageData.type}, room=${room}, sender=${sender}`);
@@ -1083,17 +1447,32 @@ wss.on('connection', function connection(ws, req) {
           return;
         }
         
+        // 발신자 이름 추출 (json에서 user_name이 있으면 사용)
+        let senderName = sender;
+        if (json && json.user_name) {
+          senderName = json.user_name;
+        } else if (json && json.userName) {
+          senderName = json.userName;
+        } else if (sender) {
+          // sender가 숫자만 있으면 user_id, 닉네임 추출 시도
+          const senderParts = String(sender).split('/');
+          if (senderParts.length > 1) {
+            senderName = senderParts[0]; // "닉네임/user_id" 형식에서 닉네임 추출
+          }
+        }
+        
         console.log(`[${new Date().toISOString()}] WS 메시지 수신 (IrisLink):`, {
           room: decryptedRoomName,
-          sender,
+          sender: senderName,
+          sender_original: sender,
           message: decryptedMessage?.substring(0, 50) + (decryptedMessage?.length > 50 ? '...' : ''),
           isGroupChat: isGroupChat !== undefined ? isGroupChat : true
         });
 
-        const replies = handleMessage(
+        const replies = await handleMessage(
           decryptedRoomName || '',
           decryptedMessage || '',
-          sender || '',
+          senderName || sender || '',  // 닉네임 우선, 없으면 원본 sender 사용
           isGroupChat !== undefined ? isGroupChat : true
         );
 
@@ -1137,6 +1516,34 @@ wss.on('connection', function connection(ws, req) {
         
         console.log(`[응답 생성] replies 개수: ${replies.length}, 최종 chat_id: ${chatId}, room: "${decryptedRoomName}"`);
         
+        // 최근 채팅방 정보 저장 (스케줄 공지 발송용)
+        if (decryptedRoomName && decryptedRoomName === CONFIG.ROOM_NAME) {
+            recentRoomInfo.roomName = decryptedRoomName;
+            recentRoomInfo.chatId = chatId;
+            recentRoomInfo.lastUpdate = new Date();
+            console.log(`[채팅방 추적] 최근 채팅방 정보 저장: roomName="${decryptedRoomName}", chatId=${chatId}`);
+        }
+        
+        // roomKey 캐시 업데이트 (사용자가 메시지를 보낼 때 받은 room 값 저장)
+        // Bridge APK가 알림에서 캐시한 roomKey와 일치하도록 사용
+        // decryptedRoomName을 키로 사용하여 채팅방별 캐시 관리
+        // 중요: 사용자가 보낸 메시지에는 알림이 없을 수 있으므로,
+        // 최근에 다른 사용자가 보낸 메시지의 알림을 활용할 수 있도록 캐시 유지
+        // 캐시 TTL을 10분으로 연장하여 더 오래 유지
+        const cacheKey = decryptedRoomName || room || CONFIG.ROOM_NAME;
+        if (room && cacheKey) {
+            updateRoomKeyCache(cacheKey, room, chatId);
+            console.log(`[roomKey 캐시] 업데이트 완료: cacheKey="${cacheKey}", room="${room}", chatId=${chatId}`);
+            
+            // 캐시 상태 확인 및 로깅
+            const cachedRoomKey = getRoomKeyFromCache(cacheKey);
+            if (cachedRoomKey) {
+                console.log(`[roomKey 캐시] 유효한 캐시 존재: cacheKey="${cacheKey}", cachedRoomKey="${cachedRoomKey}"`);
+            } else {
+                console.log(`[roomKey 캐시] 캐시 없음 또는 만료: cacheKey="${cacheKey}"`);
+            }
+        }
+        
         if (replies.length === 0) {
           console.log(`[응답 생성] 빈 응답 배열, 전송하지 않음`);
           ws.send(JSON.stringify({
@@ -1157,36 +1564,52 @@ wss.on('connection', function connection(ws, req) {
           }))
         }));
         
-        // Bridge APK용 send 형식으로도 전송 (첫 번째 응답만, Bridge APK만 대상, 클라이언트는 제외)
+        // Bridge APK용 send 형식으로도 전송 (사용자가 보낸 메시지의 원본 room 값 사용)
+        // Bridge APK가 알림에서 추출한 roomKey와 정확히 일치해야 함
+        // 중요: decryptedRoomName이 아닌 원본 room 값을 사용 (Bridge APK는 알림에서 채팅방명을 추출)
         if (replies.length > 0) {
-          const sendMessage = {
-            type: 'send',
-            id: `reply-${Date.now()}-0`,
-            roomKey: decryptedRoomName || room || '',
-            text: replies[0], // 첫 번째 응답만 전송
-            ts: Math.floor(Date.now() / 1000)
-          };
-          const messageStr = JSON.stringify(sendMessage);
+          // Bridge APK가 알림에서 추출하는 roomKey는 채팅방명이므로, 원본 room 값을 우선 사용
+          // decryptedRoomName은 복호화된 이름이므로 Bridge APK가 알림에서 추출한 값과 다를 수 있음
+          const actualRoomKey = room || CONFIG.ROOM_KEY || '';
           
-          // Bridge APK만 대상으로 전송 (현재 클라이언트 제외, 첫 번째만)
-          let sentCount = 0;
+          console.log(`[Bridge 전송] roomKey 결정: room="${room}" (원본), decryptedRoomName="${decryptedRoomName}" (복호화), 최종="${actualRoomKey}"`);
+          console.log(`[Bridge 전송] 중요: Bridge APK는 알림에서 채팅방명을 추출하므로 원본 room 값 사용`);
+          
+          // Bridge APK 클라이언트 찾기 (현재 클라이언트 제외)
+          const bridgeClients = [];
           if (wss && wss.clients) {
             for (const client of wss.clients) {
-              // 현재 클라이언트(ws)는 제외하고 Bridge APK만 전송
               if (client !== ws && client.readyState === WebSocket.OPEN) {
-                try {
-                  client.send(messageStr);
-                  sentCount++;
-                  // 첫 번째 Bridge APK에게만 전송하고 중단
-                  break;
-                } catch (err) {
-                  console.error(`[Bridge 전송] 클라이언트 전송 실패:`, err.message);
-                }
+                bridgeClients.push(client);
               }
             }
           }
           
-          console.log(`[Bridge 전송] 응답 1/1: roomKey="${decryptedRoomName || room}", text="${replies[0].substring(0, 50)}${replies[0].length > 50 ? '...' : ''}", Bridge APK 전송=${sentCount}개`);
+          // Bridge APK에 즉시 전송 (사용자가 메시지를 보낼 때 알림이 발생하므로 roomKey가 이미 캐시됨)
+          // 지연 없이 즉시 전송하여 빠른 응답 제공
+          let sentCount = 0;
+          for (let i = 0; i < replies.length; i++) {
+            const sendMessage = {
+              type: 'send',
+              id: `reply-${Date.now()}-${i}`,
+              roomKey: actualRoomKey, // 원본 room 값 사용 (Bridge APK가 알림에서 추출한 값과 일치)
+              text: replies[i],
+              ts: Math.floor(Date.now() / 1000)
+            };
+            const messageStr = JSON.stringify(sendMessage);
+            
+            // 첫 번째 Bridge APK에게 즉시 전송
+            if (bridgeClients.length > 0) {
+              try {
+                bridgeClients[0].send(messageStr);
+                sentCount++;
+              } catch (err) {
+                console.error(`[Bridge 전송] 클라이언트 전송 실패:`, err.message);
+              }
+            }
+          }
+          
+          console.log(`[Bridge 전송] 응답 ${replies.length}개 즉시 전송 완료: roomKey="${actualRoomKey}", Bridge APK 전송=${sentCount}개`);
         }
         
         console.log(`[응답 전송] ${replies.length}개 응답 전송 완료, chat_id: ${chatId}`);
@@ -1210,13 +1633,19 @@ wss.on('connection', function connection(ws, req) {
         msg: msg.substring(0, 50) + (msg.length > 50 ? '...' : ''),
         isGroupChat: isGroupChat !== undefined ? isGroupChat : true
       });
+      
+      // 디버깅: handleMessage 호출 전 로그
+      console.log(`[서버] handleMessage 호출 전: room="${room}", msg="${msg.substring(0, 100)}", sender="${sender}"`);
 
-      const replies = handleMessage(
+      const replies = await handleMessage(
         room,
         msg,
         sender,
         isGroupChat !== undefined ? isGroupChat : true
       );
+      
+      // 디버깅: handleMessage 호출 후 로그
+      console.log(`[서버] handleMessage 호출 후: replies.length=${replies.length}, replies=${JSON.stringify(replies)}`);
 
       // 기존 클라이언트용 reply 형식 전송
       const response = {
@@ -1228,36 +1657,51 @@ wss.on('connection', function connection(ws, req) {
       };
       ws.send(JSON.stringify(response));
       
-      // Bridge APK용 send 형식으로도 전송 (첫 번째 응답만, Bridge APK만 대상, 클라이언트는 제외)
+      // Bridge APK용 send 형식으로도 전송 (사용자가 보낸 메시지의 원본 room 값 사용)
+      // Bridge APK가 알림에서 추출한 roomKey와 정확히 일치해야 함
+      // 중요: 원본 room 값을 그대로 사용 (Bridge APK는 알림에서 채팅방명을 추출)
       if (replies.length > 0) {
-        const sendMessage = {
-          type: 'send',
-          id: `reply-${Date.now()}-0`,
-          roomKey: room || '',
-          text: replies[0], // 첫 번째 응답만 전송
-          ts: Math.floor(Date.now() / 1000)
-        };
-        const messageStr = JSON.stringify(sendMessage);
+        // Bridge APK가 알림에서 추출하는 roomKey는 채팅방명이므로, 원본 room 값을 사용
+        const actualRoomKey = room || CONFIG.ROOM_KEY || '';
         
-        // Bridge APK만 대상으로 전송 (현재 클라이언트 제외, 첫 번째만)
-        let sentCount = 0;
+        console.log(`[Bridge 전송] roomKey 결정: room="${room}" (원본), 최종="${actualRoomKey}"`);
+        console.log(`[Bridge 전송] 중요: Bridge APK는 알림에서 채팅방명을 추출하므로 원본 room 값 사용`);
+        
+        // Bridge APK 클라이언트 찾기 (현재 클라이언트 제외)
+        const bridgeClients = [];
         if (wss && wss.clients) {
           for (const client of wss.clients) {
-            // 현재 클라이언트(ws)는 제외하고 Bridge APK만 전송
             if (client !== ws && client.readyState === WebSocket.OPEN) {
+              bridgeClients.push(client);
+            }
+          }
+        }
+        
+          // Bridge APK에 즉시 전송 (사용자가 메시지를 보낼 때 알림이 발생하므로 roomKey가 이미 캐시됨)
+          // 지연 없이 즉시 전송하여 빠른 응답 제공
+          let sentCount = 0;
+          for (let i = 0; i < replies.length; i++) {
+            const sendMessage = {
+              type: 'send',
+              id: `reply-${Date.now()}-${i}`,
+              roomKey: actualRoomKey, // 원본 room 값 사용 (Bridge APK가 알림에서 추출한 값과 일치)
+              text: replies[i],
+              ts: Math.floor(Date.now() / 1000)
+            };
+            const messageStr = JSON.stringify(sendMessage);
+            
+            // 첫 번째 Bridge APK에게 즉시 전송
+            if (bridgeClients.length > 0) {
               try {
-                client.send(messageStr);
+                bridgeClients[0].send(messageStr);
                 sentCount++;
-                // 첫 번째 Bridge APK에게만 전송하고 중단
-                break;
               } catch (err) {
                 console.error(`[Bridge 전송] 클라이언트 전송 실패:`, err.message);
               }
             }
           }
-        }
-        
-        console.log(`[Bridge 전송] 응답 1/1: roomKey="${room}", text="${replies[0].substring(0, 50)}${replies[0].length > 50 ? '...' : ''}", Bridge APK 전송=${sentCount}개`);
+          
+          console.log(`[Bridge 전송] 응답 ${replies.length}개 즉시 전송 완료: roomKey="${actualRoomKey}", Bridge APK 전송=${sentCount}개`);
       }
     } catch (error) {
       console.error(`[${new Date().toISOString()}] 메시지 처리 오류:`, error);
@@ -1292,9 +1736,81 @@ wss.on('connection', function connection(ws, req) {
   // }, 1500);
 });
 
+// 스케줄 공지 자동 발송 체크 (30분마다)
+let scheduleNoticeInterval = null;
+
+async function checkAndSendScheduledNotice() {
+    try {
+        // 한국 시간대(KST, UTC+9)로 현재 시간 가져오기
+        const now = new Date();
+        const kstOffset = 9 * 60; // UTC+9 (분 단위)
+        const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+        const kstTime = new Date(utcTime + (kstOffset * 60000));
+        
+        const currentTime = `${kstTime.getHours()}:${String(kstTime.getMinutes()).padStart(2, '0')}`;
+        const currentMinute = kstTime.getMinutes();
+        
+        // 30분 간격 체크: 정확한 시간(예: 09:00, 09:30, 14:00 등)에만 발송
+        // 스케줄 시간은 보통 0분 또는 30분에 설정되므로, 이때만 처리
+        // 단, 사용자가 15분, 45분 등 다른 시간을 설정한 경우도 처리 가능하도록 체크
+        // (shouldSendScheduledNotice 내에서 정확한 시간 비교 수행)
+        
+        const result = await NOTICE_SYSTEM.shouldSendScheduledNotice();
+        
+        if (result && result.shouldSend && result.content) {
+            console.log(`[스케줄 공지] 자동 발송 시작: "${result.content.substring(0, 50)}..."`);
+            
+            // 모든 연결된 WebSocket 클라이언트에 공지 전송
+            if (wss && wss.clients && wss.clients.size > 0) {
+                // CONFIG에서 고정 roomKey 사용
+                const FIXED_ROOM_KEY = CONFIG.ROOM_KEY || CONFIG.ROOM_NAME;
+                let sentCount = 0;
+                
+                // WebSocket으로 공지 전송 (Bridge APK 형식: roomKey, text 사용)
+                wss.clients.forEach((client) => {
+                    if (client.readyState === WebSocket.OPEN) {
+                        try {
+                            const replyPayload = {
+                                type: 'send',
+                                id: `notice-${Date.now()}`,
+                                roomKey: FIXED_ROOM_KEY,  // 고정 roomKey 사용
+                                text: `📢 공지사항\n──────────\n${result.content}`,  // Bridge APK는 text 사용
+                                ts: Math.floor(Date.now() / 1000)
+                            };
+                            client.send(JSON.stringify(replyPayload));
+                            sentCount++;
+                            console.log(`[스케줄 공지] 클라이언트 전송: roomKey="${FIXED_ROOM_KEY}" (고정값), text 길이=${replyPayload.text.length}`);
+                        } catch (error) {
+                            console.error(`[스케줄 공지] 클라이언트 전송 오류:`, error);
+                        }
+                    }
+                });
+                
+                console.log(`[스케줄 공지] 전송 완료: ${sentCount}개 클라이언트에 전송 (roomKey: "${FIXED_ROOM_KEY}")`);
+                console.log(`[스케줄 공지] 참고: Bridge APK가 replyAction 캐시를 확인합니다.`);
+                console.log(`[스케줄 공지] - 캐시가 있으면: 즉시 전송 ✅`);
+                console.log(`[스케줄 공지] - 캐시가 없으면: 큐에 저장 후, 다음 알림 시 자동 전송 ⏳`);
+            } else {
+                console.log(`[스케줄 공지] 전송 실패: 연결된 클라이언트 없음 (총 ${wss?.clients?.size || 0}개)`);
+            }
+        } else {
+            // 발송할 공지가 없을 때는 로그 출력 안 함 (너무 많은 로그 방지)
+        }
+    } catch (error) {
+        console.error(`[스케줄 공지] 체크 오류:`, error);
+    }
+}
+
 // HTTP 서버 시작
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[${new Date().toISOString()}] HTTP listening on 0.0.0.0:${PORT}`);
+  
+  // 스케줄 공지 체크 시작 (30분마다)
+  scheduleNoticeInterval = setInterval(async () => {
+      await checkAndSendScheduledNotice();
+  }, 1800000); // 30분마다 체크 (1800000ms = 30분)
+  
+  console.log(`[${new Date().toISOString()}] 스케줄 공지 자동 체크 시작 (30분 간격)`);
 });
 
 // 종료 처리 (로그 스트림 닫기 포함)

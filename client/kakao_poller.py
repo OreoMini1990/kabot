@@ -352,6 +352,142 @@ def get_latest_message_id():
         print(f"[검증 오류] 최신 메시지 ID 조회 실패: {e}")
         return None
 
+def get_name_of_user_id(user_id):
+    """
+    Iris 원본 코드 기반: user_id로 발신자 이름 조회 (KakaoDB.getNameOfUserId)
+    
+    Args:
+        user_id: 발신자의 user_id (Long integer 또는 문자열)
+    
+    Returns:
+        발신자 이름 (복호화된) 또는 None
+    """
+    if not user_id:
+        return None
+    
+    try:
+        user_id_str = str(user_id)
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Iris 방식: KakaoTalk2.db를 db2로 attach
+        db2_attached = False
+        try:
+            if os.path.exists(DB_PATH2):
+                cursor.execute(f"ATTACH DATABASE '{DB_PATH2}' AS db2")
+                db2_attached = True
+        except Exception as e:
+            print(f"[발신자] db2 attach 실패: {e}")
+        
+        # Iris 코드: checkNewDb() - open_chat_member 테이블 존재 확인
+        has_open_chat_member = False
+        if db2_attached:
+            try:
+                cursor.execute("SELECT name FROM db2.sqlite_master WHERE type='table' AND name='open_chat_member'")
+                has_open_chat_member = cursor.fetchone() is not None
+            except:
+                pass
+        
+        # Iris 코드: getNameOfUserId - 신규 DB 방식 (open_chat_member 우선)
+        if has_open_chat_member:
+            try:
+                sql = """
+                    WITH info AS (SELECT ? AS user_id)
+                    SELECT COALESCE(db2.open_chat_member.nickname, db2.friends.name) AS name,
+                           COALESCE(db2.open_chat_member.enc, db2.friends.enc) AS enc
+                    FROM info
+                    LEFT JOIN db2.open_chat_member ON db2.open_chat_member.user_id = info.user_id
+                    LEFT JOIN db2.friends ON db2.friends.id = info.user_id
+                """
+                cursor.execute(sql, (user_id_str,))
+                result = cursor.fetchone()
+                
+                if result and result[0]:
+                    encrypted_name = result[0]
+                    enc = result[1] if len(result) > 1 and result[1] is not None else 0
+                    
+                    # 암호화되어 있으면 복호화 시도 (Iris: KakaoDecrypt.decrypt(enc, encryptedName, Configurable.botId))
+                    if KAKAODECRYPT_AVAILABLE and MY_USER_ID and enc > 0:
+                        # base64로 보이는 경우 암호화된 것으로 간주
+                        is_base64_like = (isinstance(encrypted_name, str) and 
+                                        len(encrypted_name) > 10 and 
+                                        len(encrypted_name) % 4 == 0 and
+                                        all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in encrypted_name))
+                        
+                        if is_base64_like:
+                            # enc 후보: 조회한 enc, 31, 30
+                            enc_candidates = [enc, 31, 30]
+                            enc_candidates = list(dict.fromkeys(enc_candidates))
+                            
+                            for enc_try in enc_candidates:
+                                try:
+                                    decrypt_user_id_int = int(MY_USER_ID)
+                                    if decrypt_user_id_int > 0:
+                                        decrypted = KakaoDecrypt.decrypt(decrypt_user_id_int, enc_try, encrypted_name)
+                                        if decrypted and decrypted != encrypted_name:
+                                            # 유효한 텍스트인지 확인
+                                            has_control_chars = any(ord(c) < 32 and c not in '\n\r\t' for c in decrypted)
+                                            if not has_control_chars:
+                                                conn.close()
+                                                return decrypted
+                                except:
+                                    continue
+                    
+                    # 복호화 실패하거나 암호화되지 않은 경우 원본 반환
+                    conn.close()
+                    return encrypted_name
+            except Exception as e:
+                print(f"[발신자] open_chat_member 조회 오류: {e}")
+        else:
+            # Iris 코드: 구 DB 방식 (friends 테이블만)
+            try:
+                sql = "SELECT name, enc FROM db2.friends WHERE id = ?"
+                if db2_attached:
+                    cursor.execute(sql, (user_id_str,))
+                    result = cursor.fetchone()
+                    
+                    if result and result[0]:
+                        encrypted_name = result[0]
+                        enc = result[1] if len(result) > 1 and result[1] is not None else 0
+                        
+                        # 암호화되어 있으면 복호화 시도
+                        if KAKAODECRYPT_AVAILABLE and MY_USER_ID and enc > 0:
+                            try:
+                                is_base64_like = (isinstance(encrypted_name, str) and 
+                                                len(encrypted_name) > 10 and 
+                                                len(encrypted_name) % 4 == 0 and
+                                                all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in encrypted_name))
+                                
+                                if is_base64_like:
+                                    enc_candidates = [enc, 31, 30]
+                                    enc_candidates = list(dict.fromkeys(enc_candidates))
+                                    
+                                    for enc_try in enc_candidates:
+                                        try:
+                                            decrypt_user_id_int = int(MY_USER_ID)
+                                            if decrypt_user_id_int > 0:
+                                                decrypted = KakaoDecrypt.decrypt(decrypt_user_id_int, enc_try, encrypted_name)
+                                                if decrypted and decrypted != encrypted_name:
+                                                    has_control_chars = any(ord(c) < 32 and c not in '\n\r\t' for c in decrypted)
+                                                    if not has_control_chars:
+                                                        conn.close()
+                                                        return decrypted
+                                        except:
+                                            continue
+                            except:
+                                pass
+                        else:
+                            conn.close()
+                            return encrypted_name
+            except Exception as e:
+                print(f"[발신자] friends 조회 오류: {e}")
+        
+        conn.close()
+        return None
+    except Exception as e:
+        print(f"[발신자] 이름 조회 실패: user_id={user_id}, 오류={e}")
+        return None
+
 def get_chat_room_data(chat_id):
     """채팅방 ID로 채팅방 데이터 조회 (Iris 방식: private_meta에서 name 추출)"""
     try:
@@ -1024,7 +1160,23 @@ def send_to_server(message_data):
         
         room_id = str(chat_id) if chat_id else ""
         
-        sender = str(message_data.get("user_id", ""))
+        # 발신자 이름 조회 (Iris 방식)
+        user_id = message_data.get("user_id")
+        sender_name = None
+        if user_id:
+            # Iris 원본 코드: getChatInfo에서 getNameOfUserId 호출
+            sender_name = get_name_of_user_id(user_id)
+            if sender_name:
+                print(f"[발신자] 이름 조회 성공: user_id={user_id}, 이름=\"{sender_name}\"")
+            else:
+                print(f"[발신자] 이름 조회 실패: user_id={user_id}, user_id만 사용")
+        
+        # 발신자 값 결정: 이름이 있으면 "이름/user_id", 없으면 "user_id"
+        if sender_name:
+            sender = f"{sender_name}/{user_id}" if user_id else sender_name
+        else:
+            sender = str(user_id) if user_id else ""
+        
         message = str(message_data.get("message", ""))
         v_field = message_data.get("v")
         

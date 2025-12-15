@@ -72,7 +72,22 @@ class KakaoNotificationListenerService : NotificationListenerService() {
                 if (remoteInputs != null && remoteInputs.isNotEmpty() && action.actionIntent != null) {
                     // replyAction 발견
                     Log.d(TAG, "Found replyAction for roomKey: $roomKey")
-                    notificationCache.updateCache(roomKey, action.actionIntent, remoteInputs)
+                    
+                    // 기존 캐시가 있으면 시간만 갱신, 없으면 새로 생성
+                    val existingCache = notificationCache.getReplyAction(roomKey)
+                    if (existingCache != null) {
+                        Log.d(TAG, "Refreshing existing cache for roomKey: $roomKey")
+                        notificationCache.refreshCacheTime(roomKey)
+                        // PendingIntent가 변경되었을 수 있으므로 업데이트
+                        notificationCache.updateCache(roomKey, action.actionIntent, remoteInputs)
+                    } else {
+                        Log.d(TAG, "Creating new cache for roomKey: $roomKey")
+                        notificationCache.updateCache(roomKey, action.actionIntent, remoteInputs)
+                    }
+                    
+                    // 캐시 상태 로깅
+                    val cacheInfo = notificationCache.getCacheInfo()
+                    Log.d(TAG, "Cache status: totalEntries=${cacheInfo["totalEntries"]}")
                     
                     // 3. 해당 roomKey로 대기 중인 전송 요청이 있으면 즉시 처리
                     serviceScope.launch {

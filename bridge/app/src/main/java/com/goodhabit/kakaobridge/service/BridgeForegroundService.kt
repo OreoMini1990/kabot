@@ -69,6 +69,11 @@ class BridgeForegroundService : Service() {
         
         val notificationCache = NotificationActionCache()
         remoteInputSender = RemoteInputSender(this, notificationCache)
+        
+        // 캐시 정리 태스크 시작 (주기적으로 오래된 캐시 제거)
+        serviceScope.launch {
+            cleanupCachePeriodically(notificationCache)
+        }
 
         // 서비스 상태 브로드캐스트 전송
         broadcastServiceState(true)
@@ -447,6 +452,37 @@ class BridgeForegroundService : Service() {
         val delays = listOf(5000L, 20000L, 60000L, 180000L, 600000L)
         val delay = delays.getOrElse(retryCount - 1) { delays.last() }
         return System.currentTimeMillis() + delay
+    }
+    
+    /**
+     * 주기적으로 캐시 정리 (오래된 캐시 제거)
+     * 30분마다 실행하여 2시간 이상 된 캐시 제거
+     */
+    private suspend fun cleanupCachePeriodically(cache: NotificationActionCache) {
+        while (true) {
+            try {
+                Log.d(TAG, "Starting cache cleanup...")
+                val beforeCount = cache.getAllCachedRoomKeys().size
+                cache.removeOldCache(maxAgeMs = 7200000) // 2시간
+                val afterCount = cache.getAllCachedRoomKeys().size
+                val removedCount = beforeCount - afterCount
+                
+                if (removedCount > 0) {
+                    Log.i(TAG, "Cache cleanup completed: removed $removedCount entries, remaining: $afterCount")
+                } else {
+                    Log.d(TAG, "Cache cleanup completed: no entries removed, total: $afterCount")
+                }
+                
+                // 캐시 상태 로깅
+                val cacheInfo = cache.getCacheInfo()
+                Log.d(TAG, "Cache status: ${cacheInfo["totalEntries"]} entries")
+                
+                delay(1800000) // 30분마다 실행
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during cache cleanup", e)
+                delay(1800000)
+            }
+        }
     }
 
     /**

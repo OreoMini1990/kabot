@@ -7,10 +7,12 @@ const fs = require('fs');
 const path = require('path');
 const https = require('https');
 const http = require('http');
+const db = require('./db/database');
 
 // ========== 설정 ==========
 const CONFIG = {
     ROOM_NAME: "의운모",
+    ROOM_KEY: "의운모",  // Bridge APK용 고정 roomKey (스케줄 공지 자동 발송용)
     ADMIN_USERS: ["랩장/AN/서울"],
     DATA_DIR: "/home/app/iris-core/data",  // 데이터 디렉토리
     FILE_PATHS: {
@@ -35,306 +37,395 @@ const CONFIG = {
         POINT_SYSTEM: false,      // 포인트/랭킹 기능 (false = 비활성화)
         SHOP_SYSTEM: false,       // 상점 기능 (false = 비활성화)
         MEMBERSHIP_SYSTEM: false, // 멤버십/내정보 기능 (false = 비활성화)
+        NAVER_CAFE: process.env.NAVER_CAFE_ENABLED === 'true',  // 네이버 카페 질문 기능
         USE_ONNOTI: false        // onNoti 함수 사용 (WebSocket 환경에서는 false)
     }
 };
 
-// ========== 비속어/욕설 필터 ==========
+// 디버깅: 시작 시 NAVER_CAFE 기능 상태 로그
+console.log(`[설정] NAVER_CAFE 기능: ${CONFIG.FEATURES.NAVER_CAFE} (환경변수: ${process.env.NAVER_CAFE_ENABLED})`);
+
+// ========== 비속어/욕설 필터 (DB 기반) ==========
 const PROFANITY_FILTER = {
-    // 비속어 목록
-    words: [
-        "시발", "씨발", "개새끼", "병신", "좆", "지랄", "미친", "미친놈", "미친년",
-        "개같은", "개소리", "좆같은", "지랄하네", "빠가", "바보", "멍청이",
-        "죽어", "죽어라", "꺼져", "꺼지세요", "닥쳐", "닥치세요",
-        "간조년"
-    ],
+    // 정규화 전처리 함수 (우회 문자 대응)
+    normalizeText: function(text) {
+        return text
+            .toLowerCase()
+            // 특수문자/띄어쓰기/개행 정규화
+            .replace(/[^0-9a-zA-Z가-힣ㄱ-ㅎㅏ-ㅣ]+/g, " ")
+            // 연속 공백을 1칸으로
+            .replace(/\s+/g, " ")
+            // 같은 문자 3회 이상 → 2회로 축약 (ㅋㅋㅋㅋ → ㅋㅋ, 씨발발발 → 씨발)
+            .replace(/(.)\1{2,}/g, "$1$1")
+            .trim();
+    },
     
-    // 타직업 비하 표현
-    jobDiscrimination: [
-        "간호사", "간호사새끼", "간호사년", "간호사놈", "의사새끼", "의사년",
-        "약사", "약사새끼", "약사년", "한의사", "한의사새끼"
-    ],
+    // DB에서 비속어 목록 로드
+    loadWords: async function() {
+        try {
+            const words = await db.prepare('SELECT word, type FROM profanity_words').all();
+            this.words = words.filter(w => w.type === 'profanity').map(w => w.word);
+            this.jobDiscrimination = words.filter(w => w.type === 'job_discrimination').map(w => w.word);
+            
+            // 정규식 패턴 컴파일 (성능 최적화)
+            this.compilePatterns();
+        } catch (error) {
+            console.error('[필터] DB 로드 실패, 기본값 사용:', error.message);
+            // 기본값 (DB 실패 시)
+            this.words = ["시발", "씨발", "개새끼", "병신", "좆", "지랄", "미친", "미친놈", "미친년",
+                "개같은", "개소리", "좆같은", "지랄하네", "빠가", "바보", "멍청이",
+                "죽어", "죽어라", "꺼져", "꺼지세요", "닥쳐", "닥치세요", "간조년"];
+            this.jobDiscrimination = ["간호사새끼", "간호사년", "간호사놈", "의사새끼", "의사년",
+                "약사새끼", "약사년", "한의사새끼"];
+            this.compilePatterns();
+        }
+    },
     
-    // 필터링 체크
-    check: function(msg) {
-        const lowerMsg = msg.toLowerCase();
+    // 정규식 패턴 컴파일
+    compilePatterns: function() {
+        // 강한 욕설 코어 패턴 (자모 변형 포함)
+        const severeProfanityCore = [
+            '씨+발+', 'ㅆㅂ', 'ㅅㅂ', '시발', 'ssibal', 'sibal',
+            '미친', '미쳤', '미쳤네',
+            '좆', 'ㅈ', '좃',
+            'ㅈㄹ', '지랄',
+            '개새끼', '개새기', '개쉐끼',
+            '병신', '병씬', '벙신',
+            '지랄하네', '지랄하냐',
+            '좆같', 'ㅈ같', '좃같',
+            '개같', '개같은',
+            '새끼', '쉐끼', '쌔끼'
+        ].map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
         
-        // 비속어 체크
+        // 직종 키워드 패턴
+        const jobKeywords = [
+            '의사', '의새', '의룡',
+            '간호사', '간호조무사', '간조', '조무사',
+            '물리치료사', '물치',
+            '방사선사', '방사',
+            '임상병리사', '병리',
+            '약사', '한의사',
+            '심평', '심평원',
+            '공단', '건보공단', '건강보험공단'
+        ].map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+        
+        // 비하 접미/접두 패턴
+        const discriminationSuffix = [
+            '년들?', '놈들?', '새끼들?', '새끼', 
+            'ㅅㄲ', 'x끼', 'X끼',
+            '병신', '미친', '좆', 'ㅆㅂ', 'ㅅㅂ'
+        ].map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+        
+        // Level 3: 즉시 차단 - 욕설(강) + 직종 조합
+        // 패턴: (욕설) + (직종) 또는 (직종) + (비하접미)
+        this.severeJobPattern = new RegExp(
+            `(?:${severeProfanityCore})\\s*(?:${jobKeywords})|` +
+            `(?:${jobKeywords})\\s*(?:${discriminationSuffix})`,
+            'i'
+        );
+        
+        // Level 2: 경고 - 강한 욕설 단독
+        this.severeProfanityPattern = new RegExp(
+            `(?:${severeProfanityCore})`,
+            'i'
+        );
+    },
+    
+    // 필터링 체크 (정규화 + 정규식 기반)
+    check: async function(msg) {
+        // DB에서 최신 목록 로드 (캐싱 없이 매번 로드 - 관리자가 수정할 수 있으므로)
+        await this.loadWords();
+        
+        // 정규화 전처리 (우회 문자 대응)
+        const normalizedMsg = this.normalizeText(msg);
+        const originalLowerMsg = msg.toLowerCase();
+        
+        // Level 3: 즉시 차단 - 욕설(강) + 직종 비하 조합
+        const severeJobMatch = this.severeJobPattern.test(normalizedMsg) || 
+                               this.severeJobPattern.test(originalLowerMsg);
+        if (severeJobMatch) {
+            // 매칭된 패턴 추출 (로그용)
+            const match = normalizedMsg.match(this.severeJobPattern) || 
+                         originalLowerMsg.match(this.severeJobPattern);
+            return { 
+                blocked: true, 
+                reason: "타직업 비하 표현 (Level 3)", 
+                word: match ? match[0] : "직종 비하",
+                level: 3
+            };
+        }
+        
+        // Level 2: 경고 - 강한 욕설 단독
+        const severeMatch = this.severeProfanityPattern.test(normalizedMsg) || 
+                           this.severeProfanityPattern.test(originalLowerMsg);
+        if (severeMatch) {
+            const match = normalizedMsg.match(this.severeProfanityPattern) || 
+                         originalLowerMsg.match(this.severeProfanityPattern);
+            return { 
+                blocked: true, 
+                reason: "비속어 사용 (Level 2)", 
+                word: match ? match[0] : "강한 욕설",
+                level: 2
+            };
+        }
+        
+        // Level 1: 로그만 - 경미한 비속어 (DB 단어 목록 체크)
+        // 기존 방식과 병행 (DB에서 관리하는 단어들)
         for (let i = 0; i < this.words.length; i++) {
-            if (lowerMsg.indexOf(this.words[i].toLowerCase()) !== -1) {
-                return { blocked: true, reason: "비속어 사용", word: this.words[i] };
+            const word = this.words[i].toLowerCase();
+            // 정규화된 메시지에서 체크
+            if (normalizedMsg.indexOf(word) !== -1 || originalLowerMsg.indexOf(word) !== -1) {
+                return { 
+                    blocked: true, 
+                    reason: "비속어 사용", 
+                    word: this.words[i],
+                    level: 1
+                };
             }
         }
         
-        // 타직업 비하 체크
+        // 타직업 비하 단어 목록 체크 (DB에서 관리)
         for (let i = 0; i < this.jobDiscrimination.length; i++) {
             const pattern = this.jobDiscrimination[i].toLowerCase();
-            if (lowerMsg.indexOf(pattern) !== -1) {
-                const discriminationPatterns = ["새끼", "년", "놈", "개", "좆"];
-                for (let j = 0; j < discriminationPatterns.length; j++) {
-                    if (lowerMsg.indexOf(pattern + discriminationPatterns[j]) !== -1 ||
-                        lowerMsg.indexOf(discriminationPatterns[j] + pattern) !== -1) {
-                        return { blocked: true, reason: "타직업 비하 표현", word: this.jobDiscrimination[i] };
-                    }
-                }
+            if (normalizedMsg.indexOf(pattern) !== -1 || originalLowerMsg.indexOf(pattern) !== -1) {
+                return { 
+                    blocked: true, 
+                    reason: "타직업 비하 표현", 
+                    word: this.jobDiscrimination[i],
+                    level: 2
+                };
             }
         }
         
         return { blocked: false };
     },
     
-    // 로그 기록
-    log: function(sender, msg, reason) {
+    // 로그 기록 (DB 기반)
+    log: async function(sender, msg, reason, word) {
         try {
-            const logFile = CONFIG.FILE_PATHS.FILTER_LOG;
-            const logEntry = new Date().toISOString() + " | " + sender + " | " + reason + " | " + msg + "\n";
-            const existingLog = readFileSafe(logFile) || "";
-            writeFileSafe(logFile, existingLog + logEntry);
+            // DB에 저장
+            const stmt = db.prepare('INSERT INTO filter_logs (sender, message, reason, word) VALUES (?, ?, ?, ?)');
+            await stmt.run(sender, msg, reason, word || null);
         } catch (e) {
-            // 로그 기록 실패는 무시
+            console.error('[필터] 로그 저장 실패:', e.message);
+            // 파일 백업 (DB 실패 시)
+            try {
+                const logFile = CONFIG.FILE_PATHS.FILTER_LOG;
+                const logEntry = new Date().toISOString() + " | " + sender + " | " + reason + " | " + msg + "\n";
+                const existingLog = readFileSafe(logFile) || "";
+                writeFileSafe(logFile, existingLog + logEntry);
+            } catch (e2) {
+                // 파일 저장도 실패하면 무시
+            }
         }
     },
     
-    // 경고 횟수 증가 및 반환
-    addWarning: function(sender) {
+    // 경고 횟수 증가 및 반환 (DB 기반)
+    addWarning: async function(sender) {
         try {
-            const warningFile = CONFIG.FILE_PATHS.WARNING_LOG;
-            const warningData = readFileSafe(warningFile);
-            const warningDict = {};
+            // DB에서 조회 또는 생성
+            const existing = await db.prepare('SELECT count FROM warnings WHERE sender = ?').get(sender);
             
-            if (warningData) {
-                const lines = warningData.split("\n");
-                for (let i = 0; i < lines.length; i++) {
-                    if (!lines[i]) continue;
-                    const parts = lines[i].split("|");
-                    if (parts.length === 2) {
-                        warningDict[parts[0].trim()] = parseInt(parts[1].trim()) || 0;
-                    }
-                }
+            if (existing) {
+                const newCount = existing.count + 1;
+                await db.prepare('UPDATE warnings SET count = ?, last_warning_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE sender = ?').run(newCount, sender);
+                return newCount;
+            } else {
+                await db.prepare('INSERT INTO warnings (sender, count) VALUES (?, 1)').run(sender);
+                return 1;
             }
-            
-            if (!(sender in warningDict)) {
-                warningDict[sender] = 0;
-            }
-            warningDict[sender] += 1;
-            
-            const newWarningData = Object.keys(warningDict).map(function(user) {
-                return user + "|" + warningDict[user];
-            }).join("\n") + "\n";
-            
-            writeFileSafe(warningFile, newWarningData);
-            
-            return warningDict[sender];
         } catch (e) {
-            return 1;
+            console.error('[필터] 경고 저장 실패:', e.message);
+            return 1; // 오류 시 기본값 1 반환
         }
     },
     
-    // 경고 횟수 조회
-    getWarningCount: function(sender) {
+    // 경고 횟수 조회 (DB 기반)
+    getWarningCount: async function(sender) {
         try {
-            const warningFile = CONFIG.FILE_PATHS.WARNING_LOG;
-            const warningData = readFileSafe(warningFile);
-            
-            if (!warningData) {
-                return 0;
-            }
-            
-            const lines = warningData.split("\n");
-            for (let i = 0; i < lines.length; i++) {
-                if (!lines[i]) continue;
-                const parts = lines[i].split("|");
-                if (parts.length === 2 && parts[0].trim() === sender) {
-                    return parseInt(parts[1].trim()) || 0;
-                }
-            }
-            
-            return 0;
+            const result = await db.prepare('SELECT count FROM warnings WHERE sender = ?').get(sender);
+            return result ? result.count : 0;
         } catch (e) {
+            console.error('[필터] 경고 조회 실패:', e.message);
             return 0;
         }
     },
     
     // 경고 메시지 생성
     getWarningMessage: function(sender, warningCount) {
-        const name = sender.split('/')[0];
+        // sender에서 닉네임 추출
+        const senderName = extractSenderName(sender);
         
-        if (warningCount === 1) {
-            return "⚠️ " + name + "님, 비속어 사용 시 강퇴될 수 있습니다.";
-        } else if (warningCount === 2) {
-            return "⚠️ " + name + "님, 비속어 사용 시 강퇴될 수 있습니다. (2회 경고)";
-        } else if (warningCount >= 3) {
-            return "🚨 " + name + "님, 운영진에게 보고됩니다. 강퇴 대상자 등록되었습니다. (3회 경고)";
+        // user_id만 있으면 닉네임 없이 표시
+        if (!senderName || /^\d+$/.test(String(senderName).trim())) {
+            if (warningCount === 1) {
+                return "⚠️ 비속어 사용 시 강퇴될 수 있습니다.";
+            } else if (warningCount === 2) {
+                return "⚠️ 비속어 사용 시 강퇴될 수 있습니다. (2회 경고)";
+            } else if (warningCount >= 3) {
+                return "🚨 운영진에게 보고됩니다. 강퇴 대상자 등록되었습니다. (3회 경고)";
+            }
+        } else {
+            // 닉네임이 있으면 닉네임 표시
+            if (warningCount === 1) {
+                return "⚠️ " + senderName + "님, 비속어 사용 시 강퇴될 수 있습니다.";
+            } else if (warningCount === 2) {
+                return "⚠️ " + senderName + "님, 비속어 사용 시 강퇴될 수 있습니다. (2회 경고)";
+            } else if (warningCount >= 3) {
+                return "🚨 " + senderName + "님, 운영진에게 보고됩니다. 강퇴 대상자 등록되었습니다. (3회 경고)";
+            }
         }
         
         return "⚠️ 부적절한 표현이 감지되었습니다. 존중하는 대화를 부탁드립니다.";
     }
 };
 
-// ========== 공지 시스템 ==========
+// ========== 공지 시스템 (DB 기반) ==========
 const NOTICE_SYSTEM = {
-    lastNoticeTime: null,
-    
-    // 마지막 공지 시간 로드
-    loadLastNoticeTime: function() {
+    // 스케줄 기반 공지 발송 체크 (DB 기반)
+    shouldSendScheduledNotice: async function() {
+        if (!CONFIG.NOTICE_ENABLED) {
+            console.log('[공지] 공지 기능이 비활성화되어 있습니다.');
+            return false;
+        }
+        
         try {
-            const data = readFileSafe(CONFIG.FILE_PATHS.LAST_NOTICE_TIME);
-            if (data) {
-                this.lastNoticeTime = parseInt(data);
+            // 활성화된 공지 조회 (Supabase에서는 boolean)
+            const notices = await db.prepare('SELECT * FROM notices WHERE enabled = true ORDER BY created_at DESC').all();
+            
+            if (notices.length === 0) {
+                console.log('[공지] 활성화된 공지가 없습니다.');
+                return false;
             }
-        } catch (e) {
-            this.lastNoticeTime = null;
-        }
-    },
-    
-    // 마지막 공지 시간 저장
-    saveLastNoticeTime: function() {
-        try {
-            const now = new Date().getTime();
-            writeFileSafe(CONFIG.FILE_PATHS.LAST_NOTICE_TIME, now.toString());
-            this.lastNoticeTime = now;
-        } catch (e) {
-            // 저장 실패는 무시
-        }
-    },
-    
-    // 마지막 스케줄 발송 시간 로드
-    loadLastScheduleTime: function() {
-        try {
-            const data = readFileSafe(CONFIG.FILE_PATHS.LAST_SCHEDULE);
-            if (data) {
-                const lines = data.split("\n");
-                const scheduleDict = {};
-                for (let i = 0; i < lines.length; i++) {
-                    if (!lines[i]) continue;
-                    const parts = lines[i].split("|");
-                    if (parts.length === 2) {
-                        scheduleDict[parts[0].trim()] = parts[1].trim();
+            
+            // 한국 시간대(KST, UTC+9)로 현재 시간 가져오기
+            const now = new Date();
+            const kstOffset = 9 * 60; // UTC+9 (분 단위)
+            const utcTime = now.getTime() + (now.getTimezoneOffset() * 60000);
+            const kstTime = new Date(utcTime + (kstOffset * 60000));
+            
+            const currentHour = kstTime.getHours();
+            const currentMinute = kstTime.getMinutes();
+            const currentDateStr = kstTime.getFullYear() + "-" + 
+                                ("0" + (kstTime.getMonth() + 1)).slice(-2) + "-" + 
+                                ("0" + kstTime.getDate()).slice(-2);
+            
+            console.log(`[공지] 스케줄 체크: 현재 시간(KST) ${currentHour}:${String(currentMinute).padStart(2, '0')}, 활성 공지 ${notices.length}개`);
+            
+            // 각 공지 확인
+            for (let i = 0; i < notices.length; i++) {
+                const notice = notices[i];
+                
+                // 만료일 체크
+                if (notice.expiry_date) {
+                    const expiry = new Date(notice.expiry_date + "T23:59:59");
+                    if (now > expiry) {
+                        console.log(`[공지] 공지 ID ${notice.id} 만료됨 (만료일: ${notice.expiry_date})`);
+                        continue; // 만료됨
                     }
                 }
-                return scheduleDict;
-            }
-            return {};
-        } catch (e) {
-            return {};
-        }
-    },
-    
-    // 마지막 스케줄 발송 시간 저장
-    saveLastScheduleTime: function(scheduleKey, dateStr) {
-        try {
-            const scheduleDict = this.loadLastScheduleTime();
-            scheduleDict[scheduleKey] = dateStr;
-            
-            const newData = Object.keys(scheduleDict).map(function(key) {
-                return key + "|" + scheduleDict[key];
-            }).join("\n") + "\n";
-            
-            writeFileSafe(CONFIG.FILE_PATHS.LAST_SCHEDULE, newData);
-        } catch (e) {
-            // 저장 실패는 무시
-        }
-    },
-    
-    // 공지 발송 필요 여부 체크
-    shouldSendNotice: function() {
-        if (!CONFIG.NOTICE_ENABLED) return false;
-        
-        this.loadLastNoticeTime();
-        const now = new Date().getTime();
-        
-        if (this.lastNoticeTime === null) {
-            return true;
-        }
-        
-        return (now - this.lastNoticeTime) >= CONFIG.NOTICE_INTERVAL;
-    },
-    
-    // 스케줄 기반 공지 발송 체크
-    shouldSendScheduledNotice: function() {
-        if (!CONFIG.NOTICE_ENABLED) return false;
-        
-        const notice = this.getNotice();
-        if (!notice) return false;
-        
-        const lines = notice.split("\n");
-        const header = lines[0];
-        
-        if (!header.includes("|")) {
-            return false;
-        }
-        
-        const parts = header.split("|");
-        if (parts.length < 3) return false;
-        
-        const expiryDate = parts[0].trim();
-        const scheduleTimes = parts[1].trim().split(",");
-        const noticeContent = lines.slice(1).join("\n");
-        
-        const now = new Date();
-        const expiry = new Date(expiryDate + "T23:59:59");
-        if (now > expiry) {
-            return false;
-        }
-        
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
-        const currentDateStr = now.getFullYear() + "-" + 
-                            ("0" + (now.getMonth() + 1)).slice(-2) + "-" + 
-                            ("0" + now.getDate()).slice(-2);
-        
-        for (let i = 0; i < scheduleTimes.length; i++) {
-            const timeStr = scheduleTimes[i].trim();
-            const timeParts = timeStr.split(":");
-            if (timeParts.length !== 2) continue;
-            
-            const scheduleHour = parseInt(timeParts[0], 10);
-            const scheduleMinute = parseInt(timeParts[1], 10);
-            
-            if (isNaN(scheduleHour) || isNaN(scheduleMinute)) {
-                continue;
-            }
-            
-            if (scheduleHour < 0 || scheduleHour > 23 || scheduleMinute < 0 || scheduleMinute > 59) {
-                continue;
-            }
-            
-            if (currentHour === scheduleHour && currentMinute === scheduleMinute) {
-                const scheduleKey = currentDateStr + "_" + timeStr;
-                const lastSchedule = this.loadLastScheduleTime();
                 
-                if (lastSchedule[scheduleKey] !== currentDateStr) {
-                    this.saveLastScheduleTime(scheduleKey, currentDateStr);
-                    return { shouldSend: true, content: noticeContent };
+                // 스케줄 시간 확인
+                if (!notice.schedule_times) {
+                    console.log(`[공지] 공지 ID ${notice.id} 스케줄 시간 없음`);
+                    continue;
+                }
+                
+                let scheduleTimes;
+                try {
+                    scheduleTimes = JSON.parse(notice.schedule_times);
+                } catch (e) {
+                    console.error(`[공지] 공지 ID ${notice.id} 스케줄 시간 파싱 실패:`, e.message);
+                    continue;
+                }
+                
+                if (!Array.isArray(scheduleTimes) || scheduleTimes.length === 0) {
+                    console.log(`[공지] 공지 ID ${notice.id} 스케줄 시간 배열이 비어있음`);
+                    continue;
+                }
+                
+                console.log(`[공지] 공지 ID ${notice.id} 스케줄 시간:`, scheduleTimes);
+                
+                // 각 스케줄 시간 확인
+                for (let j = 0; j < scheduleTimes.length; j++) {
+                    const timeStr = scheduleTimes[j].trim();
+                    const timeParts = timeStr.split(":");
+                    if (timeParts.length !== 2) {
+                        console.log(`[공지] 공지 ID ${notice.id} 잘못된 시간 형식: ${timeStr}`);
+                        continue;
+                    }
+                    
+                    const scheduleHour = parseInt(timeParts[0], 10);
+                    const scheduleMinute = parseInt(timeParts[1], 10);
+                    
+                    if (isNaN(scheduleHour) || isNaN(scheduleMinute)) {
+                        console.log(`[공지] 공지 ID ${notice.id} 시간 파싱 실패: ${timeStr}`);
+                        continue;
+                    }
+                    if (scheduleHour < 0 || scheduleHour > 23 || scheduleMinute < 0 || scheduleMinute > 59) {
+                        console.log(`[공지] 공지 ID ${notice.id} 시간 범위 오류: ${timeStr}`);
+                        continue;
+                    }
+                    
+                    console.log(`[공지] 공지 ID ${notice.id} 시간 비교: 현재 ${currentHour}:${String(currentMinute).padStart(2, '0')} vs 스케줄 ${scheduleHour}:${String(scheduleMinute).padStart(2, '0')}`);
+                    
+                    // 현재 시간이 스케줄 시간과 정확히 일치하는지 확인
+                    if (currentHour === scheduleHour && currentMinute === scheduleMinute) {
+                        // 24시간 내 중복 발송 확인 (같은 공지의 같은 시간대) - 보내기 직전에만 확인
+                        const scheduleKey = currentDateStr + "_" + timeStr;
+                        
+                        // 24시간 전 시각 계산 (PostgreSQL TIMESTAMPTZ 기준)
+                        const oneDayAgoTimestamp = new Date(kstTime.getTime() - 24 * 60 * 60 * 1000);
+                        const oneDayAgoISO = oneDayAgoTimestamp.toISOString();
+                        
+                        // 같은 공지의 같은 시간대(예: 09:00)가 24시간 이내에 발송되었는지 확인
+                        // schedule_key에서 시간 부분(_09:00)을 추출하여 비교
+                        const existing = await db.prepare(`
+                            SELECT id, sent_at FROM notice_schedules 
+                            WHERE notice_id = ? 
+                            AND schedule_key LIKE ?
+                            AND sent_at >= ?
+                            ORDER BY sent_at DESC 
+                            LIMIT 1
+                        `).get(notice.id, `%_${timeStr}`, oneDayAgoISO);
+                        
+                        if (!existing) {
+                            // 24시간 내 발송 기록 없음 - 발송 기록 저장 후 발송
+                            await db.prepare('INSERT INTO notice_schedules (notice_id, schedule_key) VALUES (?, ?)').run(notice.id, scheduleKey);
+                            console.log(`[공지] 공지 ID ${notice.id} 발송 예정 (${timeStr}): "${notice.content.substring(0, 50)}..."`);
+                            return { shouldSend: true, content: notice.content };
+                        } else {
+                            console.log(`[공지] 공지 ID ${notice.id} 이미 24시간 내 발송됨 (${timeStr}, 마지막 발송: ${existing.sent_at})`);
+                        }
+                    }
                 }
             }
+            
+            return false;
+        } catch (e) {
+            console.error('[공지] 스케줄 체크 실패:', e.message);
+            console.error(e);
+            return false;
         }
-        
-        return false;
     },
     
-    // 공지 읽기
-    getNotice: function() {
+    // 공지 읽기 (DB 기반)
+    getNotice: async function() {
         try {
-            const noticeFile = CONFIG.FILE_PATHS.NOTICE;
-            const notice = readFileSafe(noticeFile);
-            
-            if (!notice || notice.trim() === "") {
-                return null;
-            }
-            
-            return notice.trim();
+            // 활성화된 공지 중 가장 최근 것 조회
+            const notice = await db.prepare('SELECT content FROM notices WHERE enabled = true ORDER BY created_at DESC LIMIT 1').get();
+            return notice ? notice.content : null;
         } catch (e) {
+            console.error('[공지] 조회 실패:', e.message);
             return null;
         }
     },
     
     // 공지 발송 (replies 배열에 추가)
-    sendNotice: function(replies) {
-        const notice = this.getNotice();
+    sendNotice: async function(replies) {
+        const notice = await this.getNotice();
         if (notice) {
             replies.push("📢 공지사항\n──────────\n" + notice);
-            this.saveLastNoticeTime();
             return true;
         }
         return false;
@@ -348,6 +439,26 @@ const NOTICE_SYSTEM = {
 };
 
 // ========== 유틸리티 함수 ==========
+
+// 발신자 이름 추출 (sender가 user_id만 있으면 처리)
+function extractSenderName(sender) {
+    if (!sender) return null;
+    
+    // sender 형식: "닉네임/user_id" 또는 "user_id"
+    const parts = String(sender).split('/');
+    if (parts.length > 1) {
+        // "닉네임/user_id" 형식이면 닉네임 반환
+        return parts[0].trim();
+    }
+    
+    // 숫자만 있으면 user_id로 판단하여 null 반환 (닉네임 없음)
+    if (/^\d+$/.test(String(sender).trim())) {
+        return null;
+    }
+    
+    // 그 외는 그대로 반환
+    return sender;
+}
 
 // 권한 체크
 function isAdmin(sender) {
@@ -634,10 +745,13 @@ function removeItem(itemName, replies) {
  * @param {string} msg - 메시지 내용
  * @param {string} sender - 발신자
  * @param {boolean} isGroupChat - 그룹 채팅 여부
- * @returns {string[]} 응답 메시지 배열
+ * @returns {Promise<string[]>} 응답 메시지 배열
  */
-function handleMessage(room, msg, sender, isGroupChat) {
+async function handleMessage(room, msg, sender, isGroupChat) {
     const replies = [];
+    
+    // 디버깅: 함수 호출 확인
+    console.log(`[handleMessage] 호출됨: room="${room}", msg="${msg.substring(0, 50)}...", sender="${sender}"`);
     
     // ========== 채팅방 필터링: "의운모" 채팅방만 반응 ==========
     // room 파라미터가 채팅방 이름 또는 ID일 수 있음
@@ -645,20 +759,234 @@ function handleMessage(room, msg, sender, isGroupChat) {
                      (typeof room === 'string' && room.indexOf(CONFIG.ROOM_NAME) !== -1) ||
                      (typeof CONFIG.ROOM_NAME === 'string' && CONFIG.ROOM_NAME.indexOf(room) !== -1);
     
+    console.log(`[handleMessage] 채팅방 필터링: roomMatch=${roomMatch}, ROOM_NAME="${CONFIG.ROOM_NAME}", room="${room}"`);
+    
     if (!roomMatch) {
         // "의운모" 채팅방이 아니면 응답하지 않음
+        console.log(`[handleMessage] 채팅방 불일치로 반환: room="${room}"`);
         return replies; // 빈 배열 반환
     }
 
-    // ========== "!hi"로 시작하는 메시지에만 응답 ==========
+    // ========== 스케줄 공지 체크 (메시지 수신 시마다 체크) ==========
+    // 메시지가 올 때 Bridge APK가 roomKey를 캐시하므로, 이때 스케줄 공지 발송
+    // 주기적 체크는 알림이 없어서 Bridge APK가 roomKey를 찾지 못할 수 있음
+    try {
+        const noticeResult = await NOTICE_SYSTEM.shouldSendScheduledNotice();
+        if (noticeResult && noticeResult.shouldSend && noticeResult.content) {
+            NOTICE_SYSTEM.sendScheduledNotice(replies, noticeResult.content);
+            console.log(`[스케줄 공지] 메시지 수신 시 발송: "${noticeResult.content.substring(0, 50)}..."`);
+        }
+    } catch (e) {
+        // 공지 체크 오류는 무시하고 메시지 처리 계속
+        console.error('[공지] 메시지 처리 중 스케줄 체크 오류:', e.message);
+    }
+    
+    // ========== 비속어 필터링 (모든 메시지에 적용) ==========
+    const filterResult = await PROFANITY_FILTER.check(msg);
+    if (filterResult.blocked) {
+        // 비속어 감지 시 경고 메시지 전송
+        const warningCount = await PROFANITY_FILTER.addWarning(sender);
+        
+        // 발신자 닉네임 추출 (sender가 user_id만 있으면 닉네임 파싱 시도)
+        const senderName = extractSenderName(sender);
+        
+        // Level에 따른 경고 메시지 차등화
+        let warningMsg;
+        if (filterResult.level === 3) {
+            // Level 3: 즉시 강퇴 대상 (욕설 + 직종 비하)
+            if (warningCount >= 1) {
+                warningMsg = `🚨 ${senderName || "회원"}님, 타직업 비하 표현 사용으로 즉시 강퇴 대상입니다.`;
+            } else {
+                warningMsg = PROFANITY_FILTER.getWarningMessage(senderName || sender, warningCount);
+            }
+        } else {
+            warningMsg = PROFANITY_FILTER.getWarningMessage(senderName || sender, warningCount);
+        }
+        
+        replies.push(warningMsg);
+        
+        // 로그 기록 (닉네임과 user_id 모두 저장)
+        await PROFANITY_FILTER.log(sender, msg, filterResult.reason, filterResult.word);
+        
+        // 비속어 메시지는 차단 (명령어만 처리, 일반 메시지는 무시)
+        // return replies; // 주석 처리: 명령어도 처리 가능하도록
+    }
+
+    // ========== 명령어 체크 ==========
     const trimmedMsg = msg.trim();
-    if (trimmedMsg.toLowerCase().startsWith("!hi")) {
+    const msgLower = trimmedMsg.toLowerCase();
+    console.log(`[handleMessage] 명령어 체크: trimmedMsg="${trimmedMsg}", msgLower="${msgLower}"`);
+    
+    // ========== 네이버 카페 질문 기능 (우선순위 높음) ==========
+    // !질문을 !hi보다 먼저 체크하여 !질문이 !hi로 매칭되지 않도록 함
+    console.log(`[handleMessage] 네이버 카페 체크: msgLower="${msgLower}", NAVER_CAFE=${CONFIG.FEATURES.NAVER_CAFE}, startsWith !질문=${msgLower.startsWith("!질문")}`);
+    
+    if (CONFIG.FEATURES.NAVER_CAFE && msgLower.startsWith("!질문")) {
+        console.log('[네이버 카페] 질문 명령어 처리 시작');
+        try {
+            const questionText = trimmedMsg.substring(3).trim(); // "!질문" 제거
+            const commaIndex = questionText.indexOf(',');
+            
+            if (commaIndex === -1) {
+                replies.push("❌ 질문 형식이 올바르지 않습니다.\n사용법: !질문 제목,내용\n\n예시: !질문 의사 선생님께 질문,증상이 있는데 병원을 가야 할까요?");
+                return replies;
+            }
+            
+            const title = questionText.substring(0, commaIndex).trim();
+            const content = questionText.substring(commaIndex + 1).trim();
+            
+            if (!title || title.length === 0) {
+                replies.push("❌ 질문 제목을 입력해주세요.\n사용법: !질문 제목,내용");
+                return replies;
+            }
+            
+            if (!content || content.length === 0) {
+                replies.push("❌ 질문 내용을 입력해주세요.\n사용법: !질문 제목,내용");
+                return replies;
+            }
+            
+            // 환경변수 확인
+            const naverEnabled = process.env.NAVER_CAFE_ENABLED === 'true';
+            const accessToken = process.env.NAVER_ACCESS_TOKEN;
+            const clientId = process.env.NAVER_CLIENT_ID;
+            const clientSecret = process.env.NAVER_CLIENT_SECRET;
+            const clubidStr = process.env.NAVER_CAFE_CLUBID;
+            const menuidStr = process.env.NAVER_CAFE_MENUID;
+            const headidStr = process.env.NAVER_CAFE_HEADID; // 말머리 ID (선택사항)
+            let publicBaseUrl = process.env.PUBLIC_BASE_URL || process.env.SERVER_URL || 'http://211.218.42.222:5002';
+            // 프로토콜이 없으면 추가
+            if (!publicBaseUrl.startsWith('http://') && !publicBaseUrl.startsWith('https://')) {
+                publicBaseUrl = `https://${publicBaseUrl}`;
+            }
+            
+            // 디버깅: 환경변수 값 로깅
+            console.log('[네이버 카페] 환경변수 확인:', {
+                naverEnabled,
+                accessToken: accessToken ? `있음(${accessToken.length}자)` : '없음',
+                clientId: clientId ? '있음' : '없음',
+                clientSecret: clientSecret ? '있음' : '없음',
+                clubidStr: clubidStr || '없음',
+                menuidStr: menuidStr || '없음'
+            });
+            
+            if (!naverEnabled) {
+                replies.push("❌ 네이버 카페 질문 기능이 현재 비활성화되어 있습니다.");
+                return replies;
+            }
+            
+            // Access Token 확인
+            if (!accessToken || accessToken.trim() === '') {
+                console.error('[네이버 카페] Access Token이 설정되지 않았습니다.');
+                if (!clientId || !clientSecret) {
+                    console.error('[네이버 카페] Access Token 또는 Client ID/Secret이 설정되지 않았습니다.');
+                    replies.push("❌ 네이버 카페 설정 오류가 발생했습니다. 관리자에게 문의해주세요.");
+                    return replies;
+                }
+                // TODO: Client ID/Secret으로 토큰 자동 발급 구현
+                console.error('[네이버 카페] Access Token이 없습니다. OAuth 인증이 필요합니다.');
+                replies.push("❌ 네이버 카페 인증이 필요합니다. 관리자에게 문의해주세요.");
+                return replies;
+            }
+            
+            // clubid, menuid 파싱 및 검증
+            if (!clubidStr || !menuidStr) {
+                console.error(`[네이버 카페] clubid 또는 menuid가 설정되지 않았습니다. clubid=${clubidStr}, menuid=${menuidStr}`);
+                replies.push("❌ 네이버 카페 설정 오류가 발생했습니다. 관리자에게 문의해주세요.");
+                return replies;
+            }
+            
+            const clubid = parseInt(clubidStr, 10);
+            const menuid = parseInt(menuidStr, 10);
+            const headid = headidStr ? parseInt(headidStr, 10) : null; // 말머리 ID (선택사항)
+            
+            if (isNaN(clubid) || isNaN(menuid)) {
+                console.error(`[네이버 카페] clubid 또는 menuid가 유효한 숫자가 아닙니다. clubid=${clubidStr}(${clubid}), menuid=${menuidStr}(${menuid})`);
+                replies.push("❌ 네이버 카페 설정 오류가 발생했습니다. 관리자에게 문의해주세요.");
+                return replies;
+            }
+            
+            if (headidStr && isNaN(headid)) {
+                console.warn(`[네이버 카페] headid가 유효한 숫자가 아닙니다. headid=${headidStr}, 말머리 없이 진행합니다.`);
+            }
+            
+            // 네이버 카페 질문 서비스 호출
+            const { submitQuestion, saveQuestionWithoutPermission } = require('./integrations/naverCafe/questionService');
+            const senderName = extractSenderName(sender);
+            
+            // headid 검증 및 로깅
+            const finalHeadid = (headid !== null && headid !== undefined && !isNaN(headid)) ? headid : null;
+            console.log(`[네이버 카페] headid 최종값: ${finalHeadid} (원본: ${headidStr}, 파싱: ${headid})`);
+            
+            // 네이버 카페 API 호출을 동기적으로 처리하여 결과를 즉시 응답으로 반환
+            // 사용자가 보낸 메시지에는 알림이 없으므로, "처리 중" 메시지를 보내도 전송되지 않음
+            // 따라서 API 호출 완료 후 결과를 바로 반환하고, 다른 사용자가 메시지를 보낼 때 알림이 발생하면 그때 전송됨
+            console.log(`[네이버 카페] 질문 처리 시작: title="${title}", content="${content.substring(0, 30)}..."`);
+            
+            try {
+                const result = await submitQuestion({
+                    senderId: sender,
+                    senderName: senderName,
+                    roomId: room,
+                    title: title,
+                    content: content,
+                    accessToken: accessToken,
+                    clubid: clubid,
+                    menuid: menuid,
+                    headid: finalHeadid // 유효한 경우에만 전달
+                });
+                
+                console.log(`[네이버 카페] API 호출 완료: success=${result.success}, error=${result.error || '없음'}`);
+                
+                if (result.success && result.articleUrl) {
+                    // 성공 - 이전 템플릿 형식으로 응답 (질문 답변 포함)
+                    const replyMsg = `✅ 질문 작성 완료!\n\nQ. ${title}\n${content}\n\n답변하러가기: ${result.articleUrl}`;
+                    replies.push(replyMsg);
+                } else if (result.error === 'no_permission') {
+                    // 권한 없음 - DB에만 저장
+                    await saveQuestionWithoutPermission({
+                        senderId: sender,
+                        senderName: senderName,
+                        roomId: room,
+                        title: title,
+                        content: content,
+                        clubid: clubid,
+                        menuid: menuid,
+                        headid: finalHeadid
+                    });
+                    
+                    replies.push(`⏳ 카페 글쓰기 권한이 없어 질문이 임시 저장되었습니다.\n관리자가 확인 후 작성해드리겠습니다.\n\nQ. ${title}\n${content}`);
+                } else {
+                    // 기타 오류
+                    replies.push(`❌ 질문 작성 중 오류가 발생했습니다.\n${result.message || '알 수 없는 오류'}\n\n다시 시도해주시거나 관리자에게 문의해주세요.`);
+                }
+            } catch (error) {
+                console.error('[네이버 카페] 질문 처리 오류:', error);
+                console.error('[네이버 카페] 오류 스택:', error.stack);
+                replies.push(`❌ 질문 처리 중 오류가 발생했습니다.\n오류: ${error.message}\n\n관리자에게 문의해주세요.`);
+            }
+            
+            // API 호출 완료 후 결과 반환
+            // 사용자가 보낸 메시지에는 알림이 없으므로, Bridge APK가 WAITING_NOTIFICATION 상태로 대기
+            // 다른 사용자가 메시지를 보낼 때 알림이 발생하면 그때 전송됨
+            return replies;
+            
+        } catch (error) {
+            console.error('[네이버 카페] 질문 처리 오류:', error);
+            console.error('[네이버 카페] 오류 스택:', error.stack);
+            console.error('[네이버 카페] 오류 상세:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
+            replies.push(`❌ 질문 처리 중 오류가 발생했습니다.\n오류: ${error.message}\n\n관리자에게 문의해주세요.`);
+            return replies;
+        }
+    }
+    
+    // ========== "!hi" 명령어 (네이버 카페 질문 이후 체크) ==========
+    if (msgLower.startsWith("!hi")) {
+        console.log('[handleMessage] !hi 명령어 처리');
         replies.push("helloworld");
         return replies;
     }
     
-    // "!hi"가 아니면 응답하지 않음 (빈 배열 반환)
-    return replies;
+    // 비속어 필터 통과 후 명령어 처리 계속 진행 (아래 코드 실행)
 
     // ========== 관리자 명령어 ==========
 
@@ -1456,5 +1784,17 @@ function handleMessage(room, msg, sender, isGroupChat) {
     return replies;
 }
 
-module.exports = { handleMessage, CONFIG };
+// 단축 URL 전송 함수 (server.js에서 설정)
+let sendShortUrlMessage = null;
+function setSendShortUrlMessage(fn) {
+    sendShortUrlMessage = fn;
+}
+
+// 후속 메시지 전송 함수 (server.js에서 설정)
+let sendFollowUpMessage = null;
+function setSendFollowUpMessage(fn) {
+    sendFollowUpMessage = fn;
+}
+
+module.exports = { handleMessage, CONFIG, NOTICE_SYSTEM, setSendShortUrlMessage, setSendFollowUpMessage };
 
