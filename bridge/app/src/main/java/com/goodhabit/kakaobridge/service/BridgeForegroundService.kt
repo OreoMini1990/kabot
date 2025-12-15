@@ -17,6 +17,11 @@ import com.goodhabit.kakaobridge.queue.SendRequest
 import com.goodhabit.kakaobridge.queue.SendRequestDao
 import com.goodhabit.kakaobridge.queue.SendStatus
 import com.goodhabit.kakaobridge.sender.RemoteInputSender
+import com.goodhabit.kakaobridge.sender.MessageSender
+import com.goodhabit.kakaobridge.accessibility.AccessibilitySender
+import com.goodhabit.kakaobridge.accessibility.KakaoAutomationService
+import com.goodhabit.kakaobridge.config.FeatureFlags
+import com.goodhabit.kakaobridge.config.SelectorsConfig
 import com.goodhabit.kakaobridge.websocket.BridgeWebSocketClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -44,6 +49,8 @@ class BridgeForegroundService : Service() {
     private var webSocketClient: BridgeWebSocketClient? = null
     private var sendRequestDao: SendRequestDao? = null
     private var remoteInputSender: RemoteInputSender? = null
+    private var accessibilitySender: AccessibilitySender? = null
+    private var activeSender: MessageSender? = null // 기능 플래그에 따라 선택된 전송 방식
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
@@ -67,12 +74,46 @@ class BridgeForegroundService : Service() {
         val db = com.goodhabit.kakaobridge.db.AppDatabase.getDatabase(this)
         sendRequestDao = db.sendRequestDao()
         
-        val notificationCache = NotificationActionCache()
-        remoteInputSender = RemoteInputSender(this, notificationCache)
+        // Selector 설정 로드
+        SelectorsConfig.loadFromAssets(this)
         
-        // 캐시 정리 태스크 시작 (주기적으로 오래된 캐시 제거)
-        serviceScope.launch {
-            cleanupCachePeriodically(notificationCache)
+        // 기능 플래그에 따라 전송 방식 선택
+        val sendMethod = FeatureFlags.getActiveSendMethod(this)
+        Log.i(TAG, "Active send method: ${sendMethod.name}")
+        
+        when (sendMethod) {
+            FeatureFlags.SendMethod.ACCESSIBILITY -> {
+                // 접근성 기반 전송 방식 (새로운 방식)
+                val automationService = KakaoAutomationService.getInstance()
+                if (automationService != null) {
+                    accessibilitySender = AccessibilitySender(this, automationService)
+                    activeSender = accessibilitySender
+                    Log.i(TAG, "AccessibilitySender initialized")
+                } else {
+                    Log.w(TAG, "AccessibilityService not available, falling back to RemoteInputSender")
+                    // Fallback to RemoteInputSender
+                    val notificationCache = NotificationActionCache()
+                    remoteInputSender = RemoteInputSender(this, notificationCache)
+                    activeSender = remoteInputSender
+                    
+                    // 캐시 정리 태스크 시작
+                    serviceScope.launch {
+                        cleanupCachePeriodically(notificationCache)
+                    }
+                }
+            }
+            FeatureFlags.SendMethod.REMOTE_INPUT -> {
+                // 알림 기반 전송 방식 (기존 방식)
+                val notificationCache = NotificationActionCache()
+                remoteInputSender = RemoteInputSender(this, notificationCache)
+                activeSender = remoteInputSender
+                Log.i(TAG, "RemoteInputSender initialized")
+                
+                // 캐시 정리 태스크 시작
+                serviceScope.launch {
+                    cleanupCachePeriodically(notificationCache)
+                }
+            }
         }
 
         // 서비스 상태 브로드캐스트 전송
@@ -324,10 +365,20 @@ class BridgeForegroundService : Service() {
 
     /**
      * 전송 요청 처리
+     * 
+     * 기능 플래그에 따라 선택된 전송 방식 사용
      */
     private suspend fun processSendRequest(request: SendRequest) {
-        val sender = remoteInputSender ?: run {
-            Log.e(TAG, "RemoteInputSender is null, cannot process request: id=${request.id}")
+        val sender = activeSender ?: run {
+            Log.e(TAG, "No active sender available, cannot process request: id=${request.id}")
+            val dao = sendRequestDao ?: return
+            val updated = request.copy(
+                status = SendStatus.FAILED_FINAL,
+                updatedAt = System.currentTimeMillis(),
+                errorMessage = "No active sender available"
+            )
+            dao.update(updated)
+            sendAck(request.id, "FAILED", "No active sender available")
             return
         }
         val dao = sendRequestDao ?: run {
@@ -341,6 +392,7 @@ class BridgeForegroundService : Service() {
         Log.i(TAG, "  roomKey: \"${request.roomKey}\"")
         Log.i(TAG, "  textLength: ${request.text.length}")
         Log.i(TAG, "  text: ${request.text.take(100)}${if (request.text.length > 100) "..." else ""}")
+        Log.i(TAG, "  sender type: ${sender.javaClass.simpleName}")
 
         try {
             val result = sender.send(request.roomKey, request.text)
