@@ -649,10 +649,10 @@ function handleMessage(room, msg, sender, isGroupChat) {
         // "의운모" 채팅방이 아니면 응답하지 않음
         return replies; // 빈 배열 반환
     }
-    
+
     // ========== "의운모" 채팅방의 모든 메시지에 "helloworld" 응답 ==========
     replies.push("helloworld");
-    return replies;
+            return replies;
 
     // 공지 발송 체크 (명령어가 아닌 일반 메시지일 때만)
     if (!msg.startsWith('/')) {

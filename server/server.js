@@ -1146,6 +1146,7 @@ wss.on('connection', function connection(ws, req) {
           return;
         }
 
+        // 기존 클라이언트용 reply 형식 전송
         ws.send(JSON.stringify({
           type: 'reply',
           replies: replies.map(text => ({
@@ -1155,6 +1156,37 @@ wss.on('connection', function connection(ws, req) {
             chat_id: chatId  // 숫자 chat_id 추가 (클라이언트에서 사용)
           }))
         }));
+        
+        // Bridge APK용 send 형식으로도 전송 (Bridge APK만 대상, 클라이언트는 제외)
+        replies.forEach((text, index) => {
+          const sendMessage = {
+            type: 'send',
+            id: `reply-${Date.now()}-${index}`,
+            roomKey: decryptedRoomName || room || '',
+            text: text,
+            ts: Math.floor(Date.now() / 1000)
+          };
+          const messageStr = JSON.stringify(sendMessage);
+          
+          // Bridge APK만 대상으로 전송 (현재 클라이언트 제외)
+          let sentCount = 0;
+          if (wss && wss.clients) {
+            wss.clients.forEach((client) => {
+              // 현재 클라이언트(ws)는 제외하고 Bridge APK만 전송
+              if (client !== ws && client.readyState === WebSocket.OPEN) {
+                try {
+                  client.send(messageStr);
+                  sentCount++;
+                } catch (err) {
+                  console.error(`[Bridge 전송] 클라이언트 전송 실패:`, err.message);
+                }
+              }
+            });
+          }
+          
+          console.log(`[Bridge 전송] 응답 ${index + 1}/${replies.length}: roomKey="${decryptedRoomName || room}", text="${text.substring(0, 50)}${text.length > 50 ? '...' : ''}", Bridge APK 전송=${sentCount}개`);
+        });
+        
         console.log(`[응답 전송] ${replies.length}개 응답 전송 완료, chat_id: ${chatId}`);
         return;
       }
@@ -1184,6 +1216,7 @@ wss.on('connection', function connection(ws, req) {
         isGroupChat !== undefined ? isGroupChat : true
       );
 
+      // 기존 클라이언트용 reply 형식 전송
       const response = {
         replies: replies.map(text => ({
           type: "text",
@@ -1191,8 +1224,37 @@ wss.on('connection', function connection(ws, req) {
           room
         }))
       };
-
       ws.send(JSON.stringify(response));
+      
+      // Bridge APK용 send 형식으로도 전송 (Bridge APK만 대상, 클라이언트는 제외)
+      replies.forEach((text, index) => {
+        const sendMessage = {
+          type: 'send',
+          id: `reply-${Date.now()}-${index}`,
+          roomKey: room || '',
+          text: text,
+          ts: Math.floor(Date.now() / 1000)
+        };
+        const messageStr = JSON.stringify(sendMessage);
+        
+        // Bridge APK만 대상으로 전송 (현재 클라이언트 제외)
+        let sentCount = 0;
+        if (wss && wss.clients) {
+          wss.clients.forEach((client) => {
+            // 현재 클라이언트(ws)는 제외하고 Bridge APK만 전송
+            if (client !== ws && client.readyState === WebSocket.OPEN) {
+              try {
+                client.send(messageStr);
+                sentCount++;
+              } catch (err) {
+                console.error(`[Bridge 전송] 클라이언트 전송 실패:`, err.message);
+              }
+            }
+          });
+        }
+        
+        console.log(`[Bridge 전송] 응답 ${index + 1}/${replies.length}: roomKey="${room}", text="${text.substring(0, 50)}${text.length > 50 ? '...' : ''}", Bridge APK 전송=${sentCount}개`);
+      });
     } catch (error) {
       console.error(`[${new Date().toISOString()}] 메시지 처리 오류:`, error);
       ws.send(JSON.stringify({

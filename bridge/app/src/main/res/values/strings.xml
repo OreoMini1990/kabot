@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">KakaoBridge</string>
+    <string name="notification_channel_name">KakaoBridge 서비스</string>
+    <string name="notification_channel_description">카카오톡 메시지 전송 브릿지 서비스</string>
+    <string name="foreground_notification_title">KakaoBridge 서비스 중</string>
+    <string name="foreground_notification_text">서비스 중 - 카카오톡 메시지 전송 대기 중...</string>
+    <string name="service_running">서비스 중</string>
+    <string name="service_stopped">서비스 중지됨</string>
+    <string name="button_start_service">서비스 시작</string>
+    <string name="button_stop_service">서비스 중지</string>
+    
+    <!-- 권한 요청 메시지 -->
+    <string name="permission_notification_title">알림 접근 권한 필요</string>
+    <string name="permission_notification_message">카카오톡 알림에 접근하여 메시지를 전송하려면 알림 접근 권한이 필요합니다.</string>
+    <string name="permission_battery_title">배터리 최적화 제외 필요</string>
+    <string name="permission_battery_message">백그라운드에서 안정적으로 작동하려면 배터리 최적화 제외가 필요합니다.</string>
+    
+    <!-- 설정 -->
+    <string name="settings_websocket_url">WebSocket URL</string>
+    <string name="settings_token">인증 토큰</string>
+    <string name="settings_save">저장</string>
+</resources>
+
