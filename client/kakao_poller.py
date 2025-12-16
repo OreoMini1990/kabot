@@ -1608,7 +1608,16 @@ def poll_messages():
                                     # JSON 파싱 실패 시 기본값 사용
                                     pass
                         if len(msg) >= 7:
-                            kakao_user_id = msg[6]
+                            kakao_user_id_raw = msg[6]
+                            # userId=1 같은 잘못된 값 필터링 (1000보다 큰 값만 유효)
+                            if kakao_user_id_raw and (isinstance(kakao_user_id_raw, (int, str)) and 
+                                (isinstance(kakao_user_id_raw, int) and kakao_user_id_raw > 1000) or
+                                (isinstance(kakao_user_id_raw, str) and kakao_user_id_raw.isdigit() and int(kakao_user_id_raw) > 1000)):
+                                kakao_user_id = kakao_user_id_raw
+                            else:
+                                kakao_user_id = None
+                                if kakao_user_id_raw:
+                                    print(f"[경고] 잘못된 kakao_user_id 값 무시: {kakao_user_id_raw} (ID={msg_id})")
                         if len(msg) >= 8:
                             # DB의 encType 컬럼이 있으면 우선 사용
                             db_enc_type = msg[7]
@@ -1712,17 +1721,41 @@ def poll_messages():
                         # 메시지 데이터 구성 (복호화는 send_to_server 함수에서 처리)
                         # 정상 작동 코드(55baa72) 기준: poll_messages에서는 복호화하지 않고 원본 메시지를 전송
                         # send_to_server 함수 내에서 MY_USER_ID로 복호화 처리
+                        # userId 유효성 검사 (잘못된 값 필터링)
+                        valid_user_id = None
+                        if user_id:
+                            try:
+                                user_id_num = int(user_id) if isinstance(user_id, str) and user_id.isdigit() else (user_id if isinstance(user_id, int) else None)
+                                if user_id_num and user_id_num > 1000:
+                                    valid_user_id = user_id
+                            except (ValueError, TypeError):
+                                pass
+                        
+                        # kakao_user_id 유효성 검사
+                        valid_kakao_user_id = None
+                        if kakao_user_id:
+                            try:
+                                kakao_user_id_num = int(kakao_user_id) if isinstance(kakao_user_id, str) and kakao_user_id.isdigit() else (kakao_user_id if isinstance(kakao_user_id, int) else None)
+                                if kakao_user_id_num and kakao_user_id_num > 1000:
+                                    valid_kakao_user_id = kakao_user_id
+                            except (ValueError, TypeError):
+                                pass
+                        
                         message_data = {
                             "_id": msg_id,
                             "chat_id": chat_id,
-                            "user_id": user_id,  # DB의 user_id 컬럼 (메시지 발신자)
+                            "user_id": valid_user_id,  # DB의 user_id 컬럼 (메시지 발신자, 유효성 검사 통과)
                             "message": message,  # 원본 메시지 (복호화는 send_to_server에서)
                             "created_at": created_at,
                             "v": v_field,  # 암호화 정보 포함
-                            "userId": kakao_user_id if kakao_user_id else user_id,  # 발신자 user_id (서버 참고용)
+                            "userId": valid_kakao_user_id if valid_kakao_user_id else valid_user_id,  # 발신자 user_id (서버 참고용, 유효성 검사 통과)
                             "myUserId": MY_USER_ID,  # 자신의 user_id (복호화에 사용)
                             "encType": enc_type  # 암호화 타입 (기본값: 31)
                         }
+                        
+                        # 디버그: 잘못된 값이 필터링되었는지 확인
+                        if (kakao_user_id and not valid_kakao_user_id) or (user_id and not valid_user_id):
+                            print(f"[경고] 잘못된 user_id 값 필터링: kakao_user_id={kakao_user_id}, user_id={user_id} (ID={msg_id})")
                         
                         # 서버로 전송
                         if send_to_server(message_data):
