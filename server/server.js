@@ -1650,23 +1650,46 @@ wss.on('connection', function connection(ws, req) {
         }
         
         // 최종 값 확인 (복호화된 값이어야 함)
-        if (!senderName || senderName.includes('QvsAQ4wyJs3LVpLw2XTaw==') || senderName.startsWith('/')) {
-          console.warn(`[발신자 이름] 복호화되지 않은 값 감지: "${senderName}", 원본 sender: "${sender}"`);
-          // 복호화 시도
+        // senderName이 여전히 암호화되어 있거나 유효하지 않은 경우 복호화 시도
+        const isSenderNameEncrypted = senderName && senderName.length > 10 && 
+                                      senderName.length % 4 === 0 &&
+                                      /^[A-Za-z0-9+/=]+$/.test(senderName);
+        
+        if (!senderName || isSenderNameEncrypted || senderName.includes('QvsAQ4wyJs3LVpLw2XTaw==') || senderName.startsWith('/')) {
+          if (isSenderNameEncrypted) {
+            console.warn(`[발신자 이름] 암호화된 값 감지: "${senderName.substring(0, 20)}...", 원본 sender: "${sender}"`);
+          } else {
+            console.warn(`[발신자 이름] 복호화되지 않은 값 감지: "${senderName}", 원본 sender: "${sender}"`);
+          }
+          
+          // 복호화 시도 (sender 필드에서)
           if (sender && sender.includes('/')) {
             const parts = sender.split('/');
             const namePart = parts[0];
             if (namePart && json) {
-              const myUserId = json.myUserId || json.userId || parts[1];
-              if (myUserId) {
+              const myUserId = json.myUserId || json.userId || json.user_id || parts[1];
+              // userId 유효성 검사
+              const isValidUserId = (uid) => {
+                if (!uid) return false;
+                const uidNum = Number(uid);
+                return uidNum > 1000;
+              };
+              
+              if (myUserId && isValidUserId(myUserId)) {
                 for (const encTry of [31, 30, 32]) {
-                  const decrypted = decryptKakaoTalkMessage(namePart, String(myUserId), encTry);
-                  if (decrypted && decrypted !== namePart && !/[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(decrypted)) {
-                    senderName = decrypted;
-                    console.log(`[발신자 이름] 복호화 성공: "${namePart}" -> "${decrypted}"`);
-                    break;
+                  try {
+                    const decrypted = decryptKakaoTalkMessage(namePart, String(myUserId), encTry);
+                    if (decrypted && decrypted !== namePart && !/[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(decrypted)) {
+                      senderName = decrypted;
+                      console.log(`[발신자 이름] 복호화 성공: "${namePart.substring(0, 20)}..." -> "${decrypted}"`);
+                      break;
+                    }
+                  } catch (e) {
+                    // 복호화 실패는 무시하고 다음 시도
                   }
                 }
+              } else {
+                console.warn(`[발신자 이름] 유효하지 않은 user_id로 복호화 시도 불가: ${myUserId}`);
               }
             }
           }
