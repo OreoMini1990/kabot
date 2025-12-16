@@ -1557,7 +1557,7 @@ wss.on('connection', function connection(ws, req) {
         // 메시지 메타데이터 추출
         const replyToMessageId = json?.reply_to_message_id || json?.reply_to || json?.parent_message_id || null;
         const threadId = json?.thread_id || json?.thread_message_id || null;
-        const chatId = json?.chat_id || null;
+        let chatId = json?.chat_id || null;  // let으로 변경 (이후 재할당 필요)
         
         // 메타데이터 구성
         const metadata = {
