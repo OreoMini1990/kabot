@@ -1521,38 +1521,89 @@ wss.on('connection', function connection(ws, req) {
           return;
         }
         
-        // 발신자 이름 추출 (json에서 user_name이 있으면 사용)
-        let senderName = sender;
-        if (json && json.user_name) {
-          senderName = json.user_name;
-        } else if (json && json.userName) {
-          senderName = json.userName;
+        // 발신자 이름 및 ID 추출 (복호화된 값 사용)
+        // sender는 이미 위에서 복호화되었을 수 있음 ("닉네임/user_id" 형식)
+        let senderName = null;
+        let senderId = null;
+        
+        if (sender && sender.includes('/')) {
+          // "닉네임/user_id" 형식
+          const senderParts = sender.split('/');
+          senderName = senderParts[0].trim();
+          senderId = senderParts[1] || null;
         } else if (sender) {
-          // sender가 숫자만 있으면 user_id, 닉네임 추출 시도
-          const senderParts = String(sender).split('/');
-          if (senderParts.length > 1) {
-            senderName = senderParts[0]; // "닉네임/user_id" 형식에서 닉네임 추출
+          // sender가 단일 값인 경우
+          senderName = String(sender).trim();
+        }
+        
+        // json에서 추가 정보 확인 (복호화된 값 우선)
+        if (json) {
+          // json.user_name이 복호화된 값일 수 있음
+          if (json.user_name && typeof json.user_name === 'string') {
+            // 암호화된 형태가 아니면 사용
+            const isEncrypted = json.user_name.length > 10 && 
+                               json.user_name.length % 4 === 0 &&
+                               /^[A-Za-z0-9+/=]+$/.test(json.user_name);
+            if (!isEncrypted) {
+              senderName = json.user_name;
+            }
+          } else if (json.userName && typeof json.userName === 'string') {
+            const isEncrypted = json.userName.length > 10 && 
+                               json.userName.length % 4 === 0 &&
+                               /^[A-Za-z0-9+/=]+$/.test(json.userName);
+            if (!isEncrypted) {
+              senderName = json.userName;
+            }
+          }
+          
+          // sender_id 추출
+          if (!senderId) {
+            senderId = json.user_id || json.userId || json.sender_id || null;
+          }
+        }
+        
+        // 최종 값 확인 (복호화된 값이어야 함)
+        if (!senderName || senderName.includes('QvsAQ4wyJs3LVpLw2XTaw==') || senderName.startsWith('/')) {
+          console.warn(`[발신자 이름] 복호화되지 않은 값 감지: "${senderName}", 원본 sender: "${sender}"`);
+          // 복호화 시도
+          if (sender && sender.includes('/')) {
+            const parts = sender.split('/');
+            const namePart = parts[0];
+            if (namePart && json) {
+              const myUserId = json.myUserId || json.userId || parts[1];
+              if (myUserId) {
+                for (const encTry of [31, 30, 32]) {
+                  const decrypted = decryptKakaoTalkMessage(namePart, String(myUserId), encTry);
+                  if (decrypted && decrypted !== namePart && !/[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(decrypted)) {
+                    senderName = decrypted;
+                    console.log(`[발신자 이름] 복호화 성공: "${namePart}" -> "${decrypted}"`);
+                    break;
+                  }
+                }
+              }
+            }
           }
         }
         
         console.log(`[${new Date().toISOString()}] WS 메시지 수신 (IrisLink):`, {
           room: decryptedRoomName,
           sender: senderName,
+          sender_id: senderId,
           sender_original: sender,
           message: decryptedMessage?.substring(0, 50) + (decryptedMessage?.length > 50 ? '...' : ''),
           isGroupChat: isGroupChat !== undefined ? isGroupChat : true
         });
-
+        
         console.log(`[${new Date().toISOString()}] ═══════════════════════════════════════════════════════`);
         console.log(`[${new Date().toISOString()}] handleMessage 호출 전:`);
         console.log(`  room: "${decryptedRoomName || ''}"`);
         console.log(`  msg: "${(decryptedMessage || '').substring(0, 100)}"`);
         console.log(`  sender: "${senderName || sender || ''}"`);
+        console.log(`  sender_id: "${senderId || '없음'}"`);
         console.log(`  isGroupChat: ${isGroupChat !== undefined ? isGroupChat : true}`);
         
         // 채팅 메시지 저장 (비동기, 에러가 나도 계속 진행)
         const chatLogger = require('./db/chatLogger');
-        const senderId = sender && sender.includes('/') ? sender.split('/')[1] : null;
         
         // 메시지 메타데이터 추출
         const replyToMessageId = json?.reply_to_message_id || json?.reply_to || json?.parent_message_id || null;
@@ -1600,6 +1651,43 @@ wss.on('connection', function connection(ws, req) {
               }
             } catch (err) {
               console.error('[닉네임 변경] 감지 실패:', err.message);
+            }
+          }
+          
+          // 반응(reaction) 저장 처리
+          // json에서 반응 정보 확인
+          if (json && (json.type === 'reaction' || json.reaction || json.like || json.thumbs)) {
+            try {
+              // 반응 타입 확인
+              const reactionType = json.reaction_type || json.reaction || json.like || json.thumbs || 'thumbs_up';
+              // 반응 대상 메시지 ID (현재 메시지가 반응인 경우 원본 메시지 ID)
+              const targetMessageId = json.target_message_id || json.message_id || savedMessage?.id || null;
+              // 반응한 사용자 (현재 메시지 발신자가 반응을 준 사람)
+              const reactorName = senderName || sender || '';
+              const reactorId = senderId || null;
+              // 관리자 반응 여부
+              const isAdminReaction = CONFIG.ADMIN_USERS.some(admin => {
+                const adminName = admin.includes('/') ? admin.split('/')[0] : admin;
+                return adminName === reactorName;
+              });
+              
+              if (targetMessageId && reactorName) {
+                await chatLogger.saveReaction(
+                  targetMessageId,
+                  reactionType,
+                  reactorName,
+                  reactorId,
+                  isAdminReaction
+                );
+                console.log('[반응 저장] 성공:', {
+                  message_id: targetMessageId,
+                  reaction_type: reactionType,
+                  reactor: reactorName,
+                  is_admin: isAdminReaction
+                });
+              }
+            } catch (err) {
+              console.error('[반응 저장] 실패:', err.message);
             }
           }
         } catch (err) {
