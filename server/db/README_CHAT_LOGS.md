@@ -2,13 +2,14 @@
 
 ## Supabase에서 테이블 생성
 
-`server/db/chat_logs_schema.sql` 파일의 내용을 Supabase SQL Editor에서 실행하세요.
-
 ### 단계별 설정
 
 1. Supabase 대시보드 접속
 2. SQL Editor 열기
-3. `chat_logs_schema.sql` 파일 내용 복사하여 실행
+3. 다음 순서로 SQL 파일 실행:
+   - `chat_logs_schema.sql` - 테이블, 제약조건, 인덱스, 트리거 생성
+   - `chat_logs_aggregation.sql` - 통계 집계 함수 생성 (선택사항)
+   - `chat_logs_search.sql` - 검색 함수 생성 (선택사항)
 4. 테이블 생성 확인
 
 ## 테이블 구조
@@ -32,6 +33,27 @@
 
 ### user_activity
 - 사용자 활동 추적 (향후 확장용)
+
+## 주요 기능
+
+### 1. room_user_key 해시 컬럼
+- `sender_id`가 없어도 안정적으로 사용자 식별
+- `MD5(room_name|sender_name|sender_id)` 형식으로 자동 생성
+- GENERATED 컬럼이므로 자동 관리
+
+### 2. FTS (Full Text Search)
+- 한국어 텍스트 검색 지원
+- `message_text_tsvector` 컬럼에 자동 생성
+- GIN 인덱스로 빠른 검색 성능
+
+### 3. 자동 통계 집계
+- `aggregate_user_statistics()`: 특정 날짜 통계 집계
+- `aggregate_user_statistics_range()`: 기간별 통계 집계
+- `aggregate_yesterday_statistics()`: 어제 통계 자동 집계 (스케줄 작업용)
+
+### 4. 검색 함수
+- `search_messages()`: 키워드로 메시지 검색
+- `count_messages_by_keyword()`: 키워드별 메시지 개수 조회
 
 ## 반응 수집 방법
 
