@@ -1624,6 +1624,22 @@ wss.on('connection', function connection(ws, req) {
             } else if (isEncrypted) {
               // 여전히 암호화되어 있으면 서버에서 복호화 시도
               console.log(`[발신자] 클라이언트에서 보낸 이름이 여전히 암호화되어 있음, 서버에서 복호화 시도`);
+              // 서버에서 복호화 시도
+              const myUserId = json.myUserId || json.userId || json.user_id;
+              if (myUserId) {
+                for (const encTry of [31, 30, 32]) {
+                  try {
+                    const decrypted = decryptKakaoTalkMessage(clientDecryptedName, String(myUserId), encTry);
+                    if (decrypted && decrypted !== clientDecryptedName && !/[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(decrypted)) {
+                      senderName = decrypted;
+                      console.log(`[발신자] 서버에서 복호화 성공: "${clientDecryptedName.substring(0, 20)}..." -> "${decrypted}"`);
+                      break;
+                    }
+                  } catch (e) {
+                    // 복호화 실패는 무시하고 다음 시도
+                  }
+                }
+              }
             }
           }
           

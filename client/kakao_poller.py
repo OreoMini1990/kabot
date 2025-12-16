@@ -1406,6 +1406,28 @@ def poll_messages():
                             except (ValueError, TypeError):
                                 pass
                         
+                        # 발신자 이름 조회 및 복호화 (서버로 복호화된 이름 전송)
+                        sender_name_decrypted = None
+                        sender_name_encrypted = None
+                        if valid_user_id or valid_kakao_user_id:
+                            # user_id로 발신자 이름 조회 (복호화 포함)
+                            sender_name_result = get_name_of_user_id(valid_kakao_user_id if valid_kakao_user_id else valid_user_id)
+                            if sender_name_result:
+                                # get_name_of_user_id는 이미 복호화를 시도하므로, 결과가 복호화된 이름일 가능성이 높음
+                                # 하지만 여전히 암호화되어 있을 수도 있으므로 확인
+                                is_base64_like = (isinstance(sender_name_result, str) and 
+                                                len(sender_name_result) > 10 and 
+                                                len(sender_name_result) % 4 == 0 and
+                                                all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in sender_name_result))
+                                if is_base64_like:
+                                    # 여전히 암호화되어 있으면 서버에서 복호화하도록 원본 전송
+                                    sender_name_encrypted = sender_name_result
+                                    print(f"[발신자] 이름이 여전히 암호화되어 있음: {sender_name_result[:20]}...")
+                                else:
+                                    # 복호화된 이름
+                                    sender_name_decrypted = sender_name_result
+                                    print(f"[✓ 발신자] 복호화된 이름: \"{sender_name_decrypted}\"")
+                        
                         message_data = {
                             "_id": msg_id,
                             "chat_id": chat_id,
@@ -1415,7 +1437,9 @@ def poll_messages():
                             "v": v_field,  # 암호화 정보 포함
                             "userId": valid_kakao_user_id if valid_kakao_user_id else valid_user_id,  # 발신자 user_id (서버 참고용, 유효성 검사 통과)
                             "myUserId": MY_USER_ID,  # 자신의 user_id (복호화에 사용)
-                            "encType": enc_type  # 암호화 타입 (기본값: 31)
+                            "encType": enc_type,  # 암호화 타입 (기본값: 31)
+                            "user_name": sender_name_decrypted,  # 복호화된 발신자 이름 (우선 사용)
+                            "sender_name": sender_name_decrypted  # 복호화된 발신자 이름 (별칭)
                         }
                         
                         # 디버그: 잘못된 값이 필터링되었는지 확인

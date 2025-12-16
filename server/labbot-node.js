@@ -788,24 +788,9 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
     // !신고 또는 ! 신고 (공백 포함) 모두 처리
     const hasReportCommand = /![\s]*신고/.test(msgTrimmed) || msgLower.includes('!신고');
     
-    // 답장 버튼을 누르고 !신고만 입력한 경우 (멘션 불필요)
-    if (replyToMessageId && hasReportCommand) {
+    // !신고 명령어가 있으면 처리 (답장 버튼 필수)
+    if (hasReportCommand) {
         console.log('[신고] 신고 요청 감지:', { replyToMessageId, reporter: sender, message: msg });
-        
-        // !신고 다음 내용 추출 (신고 사유)
-        let reportReason = '신고 사유 없음';
-        if (hasReportCommand) {
-            // !신고 또는 ! 신고 패턴 찾기
-            const reportMatch = msgTrimmed.match(/![\s]*신고[\s]*(.*)/i);
-            if (reportMatch && reportMatch[1]) {
-                const afterReport = reportMatch[1].trim();
-                // 멘션 제거 (@랩봇 등)
-                const cleanedReason = afterReport.replace(/@\w+/g, '').trim();
-                if (cleanedReason) {
-                    reportReason = cleanedReason;
-                }
-            }
-        }
         
         // replyToMessageId가 필수 (답장 버튼을 눌러야 함)
         if (!replyToMessageId) {
@@ -815,6 +800,18 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
                 `예시: !신고 부적절한 내용입니다`;
             replies.push(helpMessage);
             return replies;
+        }
+        
+        // !신고 다음 내용 추출 (신고 사유)
+        let reportReason = '신고 사유 없음';
+        const reportMatch = msgTrimmed.match(/![\s]*신고[\s]*(.*)/i);
+        if (reportMatch && reportMatch[1]) {
+            const afterReport = reportMatch[1].trim();
+            // 멘션 제거 (@랩봇 등)
+            const cleanedReason = afterReport.replace(/@\w+/g, '').trim();
+            if (cleanedReason) {
+                reportReason = cleanedReason;
+            }
         }
         
         const targetMessageId = replyToMessageId;
