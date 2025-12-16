@@ -1682,131 +1682,20 @@ def poll_messages():
                             sent_message_ids.add(msg_id)
                             continue
                         
-                        # 암호화된 메시지 복호화 시도
-                        decrypted_message = None
-                        
-                        # base64로 보이는 메시지는 암호화된 메시지일 가능성이 높음
-                        is_base64_like = (isinstance(message, str) and 
-                                         len(message) > 10 and 
-                                         len(message) % 4 == 0 and
-                                         all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in message))
-                        
-                        if DECRYPT_ENABLED and is_base64_like:
-                            # enc 후보: v.enc/encType 우선, 이후 31, 32, 30 순 재시도
-                            # kakaodecrypt.py 테스트에서 enc=31이 가장 일반적이므로 우선순위 높임
-                            enc_candidates = []
-                            if enc_type is not None:
-                                enc_candidates.append(enc_type)
-                            # 기본값 31을 우선 시도 (가장 일반적)
-                            enc_candidates += [31, 32, 30]
-                            enc_candidates = list(dict.fromkeys(enc_candidates))  # 중복 제거
-
-                            decrypted_message = None
-                            tried_user_ids = []
-                            
-                            # 시도할 user_id 후보 목록 (우선순위 순서)
-                            # 중요: Iris 코드 기준으로 발신자의 user_id를 사용해야 함
-                            # ObserverHelper.kt: val userId = cursor.getLong(columnNames.indexOf("user_id"))
-                            # KakaoDecrypt.decrypt(enc, message, userId) - 발신자의 user_id 사용
-                            candidate_user_ids = []
-                            decrypt_user_id = kakao_user_id if kakao_user_id else user_id
-                            if decrypt_user_id:
-                                candidate_user_ids.append(('발신자 user_id (DB)', decrypt_user_id))
-                            if MY_USER_ID and MY_USER_ID != decrypt_user_id:
-                                candidate_user_ids.append(('MY_USER_ID (fallback)', MY_USER_ID))
-                            
-                            print(f"[디버그] 복호화 시도할 user_id 후보: {candidate_user_ids}, enc 후보: {enc_candidates}")
-                            
-                            for candidate_name, candidate_id in candidate_user_ids:
-                                if decrypted_message:
-                                    break
-                                tried_user_ids.append(candidate_id)
-                                for enc_try in enc_candidates:
-                                    try:
-                                        decrypt_user_id_int = int(candidate_id)
-                                        if decrypt_user_id_int > 0:
-                                            decrypted_message = decrypt_message(message, v_field, decrypt_user_id_int, enc_try, debug=False)
-                                            if decrypted_message and decrypted_message != message:
-                                                has_control_chars = any(ord(c) < 32 and c not in '\n\r\t' for c in decrypted_message)
-                                                if not has_control_chars:
-                                                    print(f"[✓] 메시지 복호화 성공 ({candidate_name}): ID={msg_id}, user_id={candidate_id}, enc_type={enc_try}")
-                                                    if candidate_name == 'MY_USER_ID (fallback)':
-                                                        print(f"[정보] MY_USER_ID로 복호화 성공했지만, 일반적으로는 발신자 user_id를 사용합니다.")
-                                                    break
-                                                else:
-                                                    decrypted_message = None
-                                                    print(f"[경고] 복호화된 메시지가 깨져있음 ({candidate_name}): ID={msg_id}, user_id={candidate_id}, enc_type={enc_try}")
-                                            else:
-                                                decrypted_message = None
-                                    except Exception:
-                                        decrypted_message = None
-                                if decrypted_message:
-                                    break
-                            
-                            if not user_id:
-                                print(f"[경고] 발신자 user_id가 없어 복호화 불가: ID={msg_id}, enc_type={enc_type}")
-                                print(f"[해결] DB에서 user_id 컬럼을 확인하세요.")
-                            
-                            if not decrypted_message:
-                                print(f"[✗] 메시지 복호화 실패: ID={msg_id}, 발신자 user_id={user_id}, enc_type={enc_type}")
-                                if user_id:
-                                    print(f"[디버그] 복호화 실패 원인 확인: 발신자 user_id={user_id}, enc_type={enc_type}, 메시지 길이={len(message)}")
-                                    print(f"[디버그] enc 후보: {enc_candidates}, user 후보: {candidate_user_ids}")
-                            elif decrypted_message:
-                                has_control_chars = any(ord(c) < 32 and c not in '\n\r\t' for c in decrypted_message)
-                                is_garbled = len(decrypted_message) > 0 and (has_control_chars or 
-                                    any(ord(c) > 127 and c not in decrypted_message.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore') 
-                                        for c in decrypted_message))
-                                
-                                if has_control_chars or is_garbled:
-                                    print(f"[경고] 복호화된 메시지가 깨져있음: ID={msg_id}, 발신자 user_id={user_id}")
-                                    print(f"[경고] 복호화 키가 잘못되었을 가능성이 높습니다.")
-                                    print(f"[디버그] enc 후보: {enc_candidates}, user 후보: {candidate_user_ids}")
-                                    decrypted_message = None
-                        
-                        # 복호화 성공하면 복호화된 메시지 사용, 실패하면 원본 사용
-                        final_message = decrypted_message if decrypted_message else message
-                        
-                        # 복호화 실패한 base64 메시지도 서버로 전송 (서버에서 복호화 시도)
-                        # 단, 복호화 실패한 경우 원본 메시지와 함께 복호화 정보 전송
-                        if is_base64_like and not decrypted_message:
-                            print(f"[경고] 암호화된 메시지 복호화 실패: ID={msg_id}, 서버로 원본 전송 (서버에서 복호화 시도)")
-                            # 복호화 실패해도 서버로 전송 (서버에서 처리하도록)
-                            # final_message는 원본 메시지 사용
-                        
-                        # 메시지 데이터 구성
-                        # Iris 코드: ObserverHelper.kt에서 val userId = cursor.getLong(columnNames.indexOf("user_id"))
-                        # Iris 코드: KakaoDecrypt.decrypt(enc, message, userId) - 발신자의 user_id 사용
-                        # 따라서 복호화에는 발신자의 user_id를 사용해야 함
-                        # DB의 user_id 컬럼이 발신자의 user_id (Iris 코드 기준)
-                        decrypt_user_id_for_server = kakao_user_id if kakao_user_id else user_id
-                        
-                        # 중요: userId가 없으면 서버에서 복호화 불가
-                        if not decrypt_user_id_for_server:
-                            print(f"[경고] 발신자 user_id가 없어 서버 복호화 불가: ID={msg_id}, chat_id={chat_id}")
-                            print(f"[경고] DB의 user_id 컬럼을 확인하세요.")
-                        
+                        # 메시지 데이터 구성 (복호화는 send_to_server 함수에서 처리)
+                        # 정상 작동 코드(55baa72) 기준: poll_messages에서는 복호화하지 않고 원본 메시지를 전송
+                        # send_to_server 함수 내에서 MY_USER_ID로 복호화 처리
                         message_data = {
                             "_id": msg_id,
                             "chat_id": chat_id,
-                            "user_id": user_id,  # DB의 user_id 컬럼 (메시지 발신자, Iris 코드 기준)
-                            "message": final_message,  # 복호화된 메시지 또는 원본
+                            "user_id": user_id,  # DB의 user_id 컬럼 (메시지 발신자)
+                            "message": message,  # 원본 메시지 (복호화는 send_to_server에서)
                             "created_at": created_at,
                             "v": v_field,  # 암호화 정보 포함
-                            "userId": decrypt_user_id_for_server,  # 메시지 발신자 user_id (복호화에 사용, Iris 코드 기준)
-                            "myUserId": MY_USER_ID,  # 자신의 user_id (참고용, fallback용)
+                            "userId": kakao_user_id if kakao_user_id else user_id,  # 발신자 user_id (서버 참고용)
+                            "myUserId": MY_USER_ID,  # 자신의 user_id (복호화에 사용)
                             "encType": enc_type  # 암호화 타입 (기본값: 31)
                         }
-                        
-                        # 디버그: 서버로 전송할 user_id 확인 (복호화 실패한 경우만)
-                        if not decrypted_message and is_base64_like:
-                            print(f"[디버그] 서버로 전송할 user_id 정보:")
-                            print(f"  - DB 쿼리 결과: msg[2] (user_id)={user_id}, msg[6] (userId)={kakao_user_id if len(msg) >= 7 else 'N/A'}")
-                            print(f"  - 최종 선택된 userId: {decrypt_user_id_for_server} (kakao_user_id 우선, 없으면 user_id)")
-                            print(f"  - Iris 코드 기준: 발신자 user_id를 사용해야 함 (ObserverHelper.kt 참조)")
-                            print(f"  - 전송할 message_data.userId: {decrypt_user_id_for_server}")
-                            print(f"  - 전송할 message_data.user_id: {user_id}")
-                            print(f"  - 전송할 message_data.myUserId: {MY_USER_ID}")
                         
                         # 서버로 전송
                         if send_to_server(message_data):
