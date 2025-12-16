@@ -15,12 +15,45 @@ async function getOrCreateUser(roomName, senderName, senderId) {
             .update(`${roomName}|${senderName}|${senderId || ''}`)
             .digest('hex');
         
-        // 기존 사용자 조회
-        const { data: existingUser } = await db.supabase
-            .from('users')
-            .select('*')
-            .eq('internal_user_id', internalUserId)
-            .single();
+        // 기존 사용자 조회 (우선순위: kakao_user_id > internal_user_id)
+        let existingUser = null;
+        
+        if (senderId) {
+            // 1순위: kakao_user_id로 조회 (더 정확한 식별)
+            const { data: userByKakaoId } = await db.supabase
+                .from('users')
+                .select('*')
+                .eq('kakao_user_id', senderId)
+                .single();
+            
+            if (userByKakaoId) {
+                existingUser = userByKakaoId;
+            }
+        }
+        
+        // 2순위: internal_user_id로 조회
+        if (!existingUser) {
+            const { data: userByInternalId } = await db.supabase
+                .from('users')
+                .select('*')
+                .eq('internal_user_id', internalUserId)
+                .single();
+            
+            if (userByInternalId) {
+                existingUser = userByInternalId;
+                
+                // kakao_user_id가 없으면 업데이트
+                if (senderId && !existingUser.kakao_user_id) {
+                    await db.supabase
+                        .from('users')
+                        .update({
+                            kakao_user_id: senderId
+                        })
+                        .eq('id', existingUser.id);
+                    existingUser.kakao_user_id = senderId;
+                }
+            }
+        }
         
         if (existingUser) {
             // 이름이 변경되었는지 확인
@@ -31,7 +64,8 @@ async function getOrCreateUser(roomName, senderName, senderId) {
                     .insert({
                         user_id: existingUser.id,
                         old_name: existingUser.display_name,
-                        new_name: senderName
+                        new_name: senderName,
+                        changed_at: new Date().toISOString()
                     });
                 
                 if (historyError) {
@@ -837,53 +871,76 @@ async function saveAttachment(messageId, attachmentType, attachmentUrl, attachme
  */
 async function checkNicknameChange(roomName, senderName, senderId) {
     try {
-        const user = await getOrCreateUser(roomName, senderName, senderId);
-        if (!user) {
+        if (!senderId) {
+            // senderId가 없으면 비교 불가
             return null;
         }
         
-        // 사용자의 이전 이름 조회
-        const { data: nameHistory } = await db.supabase
-            .from('user_name_history')
-            .select('*')
-            .eq('user_id', user.id)
-            .order('changed_at', { ascending: false })
-            .limit(1);
+        // senderId로 기존 사용자 조회
+        const { data: existingUser } = await db.supabase
+            .from('users')
+            .select('id, display_name, kakao_user_id')
+            .eq('kakao_user_id', senderId)
+            .single();
         
-        // 이름 변경 이력이 있고, 마지막 이름과 현재 이름이 다르면 변경 감지
-        if (nameHistory && nameHistory.length > 0) {
-            const lastHistory = nameHistory[0];
-            if (lastHistory.new_name !== senderName) {
-                // 이름이 변경된 경우
-                // 이미 getOrCreateUser에서 이름 변경 이력이 저장되었을 것
-                // 전체 변경 이력 조회
-                const { data: allHistory } = await db.supabase
-                    .from('user_name_history')
-                    .select('*')
-                    .eq('user_id', user.id)
-                    .order('changed_at', { ascending: true });
-                
-                if (allHistory && allHistory.length > 0) {
-                    // 변경 이력 메시지 생성
-                    const historyLines = allHistory.map(h => {
-                        const date = new Date(h.changed_at).toISOString().split('T')[0];
-                        return `\t- ${date} : ${h.old_name} → ${h.new_name}`;
-                    });
-                    
-                    // 현재 이름도 추가
-                    const currentDate = new Date().toISOString().split('T')[0];
-                    const lastEntry = allHistory[allHistory.length - 1];
-                    if (lastEntry.new_name !== senderName) {
-                        historyLines.push(`\t- ${currentDate} : ${lastEntry.new_name} → ${senderName}`);
-                    }
-                    
-                    const notification = `🚨 닉네임 변경 감지!\n\n[닉네임 변경 이력]\n${historyLines.join('\n')}`;
-                    return notification;
-                }
-            }
+        if (!existingUser) {
+            // 새 사용자이므로 변경 없음
+            return null;
         }
         
-        return null; // 변경 없음
+        // 현재 display_name과 비교
+        if (existingUser.display_name === senderName) {
+            // 이름이 같으면 변경 없음
+            return null;
+        }
+        
+        // 이름이 변경된 경우
+        console.log('[닉네임 변경] 감지:', {
+            user_id: existingUser.id,
+            kakao_user_id: senderId,
+            old_name: existingUser.display_name,
+            new_name: senderName
+        });
+        
+        // 이름 변경 이력 저장 (getOrCreateUser에서도 저장되지만, 여기서도 명시적으로 저장)
+        const { error: historyError } = await db.supabase
+            .from('user_name_history')
+            .insert({
+                user_id: existingUser.id,
+                old_name: existingUser.display_name,
+                new_name: senderName,
+                changed_at: new Date().toISOString()
+            });
+        
+        if (historyError) {
+            console.error('[닉네임 변경] 이력 저장 실패:', historyError.message);
+        }
+        
+        // 전체 변경 이력 조회
+        const { data: allHistory } = await db.supabase
+            .from('user_name_history')
+            .select('*')
+            .eq('user_id', existingUser.id)
+            .order('changed_at', { ascending: true });
+        
+        if (allHistory && allHistory.length > 0) {
+            // 변경 이력 메시지 생성
+            const historyLines = allHistory.map(h => {
+                const date = new Date(h.changed_at).toISOString().split('T')[0];
+                return `\t- ${date} : ${h.old_name} → ${h.new_name}`;
+            });
+            
+            // 현재 변경도 추가
+            const currentDate = new Date().toISOString().split('T')[0];
+            historyLines.push(`\t- ${currentDate} : ${existingUser.display_name} → ${senderName}`);
+            
+            const notification = `🚨 닉네임 변경 감지!\n\n닉네임 변경 되셨습니다. 닉네임변경이력 채팅로그에 변경이력 기록\n\n[닉네임 변경 이력]\n${historyLines.join('\n')}`;
+            return notification;
+        } else {
+            // 이력이 없으면 간단한 메시지
+            const notification = `🚨 닉네임 변경 감지!\n\n닉네임 변경 되셨습니다. 닉네임변경이력 채팅로그에 변경이력 기록\n\n${existingUser.display_name} → ${senderName}`;
+            return notification;
+        }
     } catch (error) {
         console.error('[채팅 로그] 닉네임 변경 감지 중 오류:', error.message);
         return null;

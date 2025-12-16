@@ -633,6 +633,9 @@ function recordChatCount(sender) {
 
 async function getChatRankings(startDate, endDate, title, sender, room = '의운모') {
     try {
+        // chatLogger 모듈 로드
+        const chatLogger = require('./db/chatLogger');
+        
         // DB에서 통계 조회
         const stats = await chatLogger.getUserChatStatistics(room, startDate.toISOString(), endDate.toISOString());
         
@@ -787,26 +790,44 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         }
         
         // 신고 처리
-        const reportResult = await chatLogger.saveReport(
+        console.log('[신고] 신고 요청 처리 시작:', {
             replyToMessageId,
-            sender,
-            sender.includes('/') ? sender.split('/')[1] : null,
-            reportReason,
-            'general'
-        );
+            reporter: sender,
+            reporterId: sender.includes('/') ? sender.split('/')[1] : null,
+            reportReason
+        });
         
-        if (reportResult) {
-            const successMessage = `✅ 신고 접수 완료!\n\n` +
-                `📝 신고 내용이 관리자에게 전달되었습니다.\n` +
-                `🔍 검토 후 적절한 조치가 이루어집니다.\n\n` +
-                `감사합니다. 🙏`;
-            replies.push(successMessage);
-        } else {
+        try {
+            const reportResult = await chatLogger.saveReport(
+                replyToMessageId,
+                sender,
+                sender.includes('/') ? sender.split('/')[1] : null,
+                reportReason,
+                'general'
+            );
+            
+            console.log('[신고] 신고 처리 결과:', reportResult ? '성공' : '실패');
+            
+            if (reportResult) {
+                const successMessage = `✅ 신고 접수 완료!\n\n` +
+                    `📝 신고 내용이 관리자에게 전달되었습니다.\n` +
+                    `🔍 검토 후 적절한 조치가 이루어집니다.\n\n` +
+                    `감사합니다. 🙏`;
+                replies.push(successMessage);
+            } else {
+                const errorMessage = `❌ 신고 접수 실패\n\n` +
+                    `죄송합니다. 신고 접수 중 오류가 발생했습니다.\n` +
+                    `잠시 후 다시 시도해주세요.`;
+                replies.push(errorMessage);
+            }
+        } catch (error) {
+            console.error('[신고] 신고 처리 중 예외 발생:', error);
             const errorMessage = `❌ 신고 접수 실패\n\n` +
                 `죄송합니다. 신고 접수 중 오류가 발생했습니다.\n` +
-                `잠시 후 다시 시도해주세요.`;
+                `오류: ${error.message}`;
             replies.push(errorMessage);
         }
+        
         return replies; // 신고 처리 후 종료
     }
     
@@ -929,23 +950,30 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
                 );
                 
                 // 같은 사용자의 같은 제목/내용 질문 확인
-                // 정확한 비교를 위해 제목과 내용을 모두 확인
+                // 정확한 비교를 위해 질문 내용을 정확히 비교
                 const duplicateQuestion = recentQuestions?.find(msg => {
                     if (msg.sender_name !== questionSenderName || !msg.message_text) {
                         return false;
                     }
                     
-                    // 제목이 포함되어 있는지 확인
-                    const hasTitle = msg.message_text.includes(title);
+                    // 이전 질문의 전체 텍스트
+                    const prevText = msg.message_text.toLowerCase().trim();
+                    // 현재 질문의 전체 텍스트 (제목 + 내용)
+                    const currentText = (title + ' ' + content).toLowerCase().trim();
                     
-                    // 내용의 첫 50자 이상이 일치하는지 확인 (단순 includes가 아닌 더 정확한 비교)
-                    const msgTextLower = msg.message_text.toLowerCase().trim();
-                    const contentLower = content.toLowerCase().trim();
-                    const contentFirst50 = contentLower.substring(0, 50);
-                    const hasContent = msgTextLower.includes(contentFirst50) && contentFirst50.length >= 30; // 최소 30자 이상 일치해야 함
+                    // 두 질문이 거의 동일한 경우만 중복으로 판단
+                    // 1. 제목이 정확히 일치하고
+                    // 2. 내용의 80% 이상이 일치하는 경우
+                    const titleMatch = prevText.includes(title.toLowerCase()) && title.length >= 5;
                     
-                    // 제목과 내용이 모두 일치하거나, 내용이 80% 이상 일치하는 경우 중복으로 판단
-                    return hasTitle || hasContent;
+                    // 내용 유사도 계산 (간단한 방법: 공통 단어 비율)
+                    const prevWords = prevText.split(/\s+/).filter(w => w.length > 2);
+                    const currentWords = currentText.split(/\s+/).filter(w => w.length > 2);
+                    const commonWords = prevWords.filter(w => currentWords.includes(w));
+                    const similarity = prevWords.length > 0 ? (commonWords.length / prevWords.length) : 0;
+                    
+                    // 제목이 일치하고 유사도가 80% 이상이거나, 유사도가 90% 이상인 경우만 중복
+                    return (titleMatch && similarity >= 0.8) || similarity >= 0.9;
                 });
                 
                 if (duplicateQuestion) {
