@@ -21,6 +21,7 @@ async function saveChatMessage(roomName, senderName, senderId, messageText, isGr
         if (hasImage) messageType = 'image';
         else if (hasUrl) messageType = 'url';
         
+        // room_user_key는 GENERATED 컬럼이므로 자동 생성됨
         const { data, error } = await db.supabase
             .from('chat_messages')
             .insert({
@@ -35,6 +36,7 @@ async function saveChatMessage(roomName, senderName, senderId, messageText, isGr
                 has_mention: hasMention,
                 has_url: hasUrl,
                 has_image: hasImage
+                // room_user_key와 message_text_tsvector는 GENERATED 컬럼이므로 자동 생성
             })
             .select()
             .single();
@@ -263,6 +265,54 @@ async function getUserChatStatistics(roomName, startDate, endDate) {
 }
 
 /**
+ * 키워드로 메시지 검색 (FTS 사용)
+ */
+async function searchMessagesByKeyword(roomName, searchQuery, limit = 100) {
+    try {
+        // Supabase RPC를 사용하여 함수 호출
+        const { data, error } = await db.supabase
+            .rpc('search_messages', {
+                p_room_name: roomName,
+                p_search_query: searchQuery,
+                p_limit: limit
+            });
+        
+        if (error) {
+            console.error('[채팅 로그] 검색 실패:', error.message);
+            return [];
+        }
+        
+        return data || [];
+    } catch (error) {
+        console.error('[채팅 로그] 검색 중 오류:', error.message);
+        return [];
+    }
+}
+
+/**
+ * 일별 통계 자동 집계
+ */
+async function aggregateUserStatistics(roomName, date) {
+    try {
+        const { data, error } = await db.supabase
+            .rpc('aggregate_user_statistics', {
+                p_room_name: roomName,
+                p_date: date
+            });
+        
+        if (error) {
+            console.error('[채팅 로그] 통계 집계 실패:', error.message);
+            return false;
+        }
+        
+        return true;
+    } catch (error) {
+        console.error('[채팅 로그] 통계 집계 중 오류:', error.message);
+        return false;
+    }
+}
+
+/**
  * 가장 반응 많이 받은 사용자 조회
  */
 async function getMostReactedUser(roomName, startDate, endDate) {
@@ -338,6 +388,8 @@ module.exports = {
     saveReaction,
     getChatMessagesByPeriod,
     getUserChatStatistics,
-    getMostReactedUser
+    getMostReactedUser,
+    searchMessagesByKeyword,
+    aggregateUserStatistics
 };
 
