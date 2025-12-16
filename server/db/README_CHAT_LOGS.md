@@ -14,25 +14,68 @@
 
 ## 테이블 구조
 
-### chat_messages
-- 채팅 메시지 저장
-- 발신자, 메시지 내용, 시간 등 저장
-- 통계 분석용 필드 포함 (단어 수, 문자 수, URL 포함 여부 등)
+### 핵심 테이블
 
-### chat_reactions
+#### users (사용자 정규화)
+- 내부 사용자 ID로 안정적인 사용자 식별
+- 이름 변경 이력 추적
+- 프로필 정보 저장
+
+#### rooms (채팅방 정규화)
+- 채팅방 정보 저장
+- 채팅방 타입 (group, direct, open)
+
+#### room_members (채팅방 멤버십)
+- 사용자-채팅방 관계
+- 역할 관리 (admin, moderator, member, guest)
+
+#### chat_messages (메시지)
+- 채팅 메시지 저장
+- 메시지 상태/변경 이력 (삭제, 수정, 답글, 스레드)
+- 통계 분석용 필드 포함
+- 메타데이터 JSONB 필드로 확장 가능
+
+#### chat_reactions (반응)
 - 메시지 반응 저장 (따봉, 👍 등)
 - 사용자 반응과 관리자 반응 구분
 - 중복 반응 방지 (UNIQUE 제약)
 
-### user_statistics
+### 이력/추적 테이블
+
+#### message_edits (메시지 수정 이력)
+- 모든 수정 내역 저장
+- 원본 텍스트 보존
+
+#### message_deletions (메시지 삭제 이력)
+- 삭제 사유 및 삭제자 추적
+
+#### message_reads (읽음 상태)
+- 메시지 읽음 상태 추적
+
+#### message_mentions (멘션)
+- 멘션 정보 저장 (@username, @all, @here)
+
+#### message_attachments (첨부 파일)
+- 파일, 이미지, 비디오 등 첨부 정보
+
+#### message_forwarded (전달된 메시지)
+- 전달된 메시지의 원본 추적
+
+#### user_name_history (이름 변경 이력)
+- 사용자 이름 변경 추적
+
+### 통계 테이블
+
+#### user_statistics (사용자 통계)
 - 사용자별 일일 통계
 - 메시지 수, 반응 수, 시간대별 통계 등
 
-### message_keywords
-- 키워드/주제 추출 (향후 확장용)
+#### user_activity (사용자 활동)
+- 사용자 활동 추적
+- 마지막 메시지/반응 시간
 
-### user_activity
-- 사용자 활동 추적 (향후 확장용)
+#### message_keywords (키워드)
+- 키워드/주제 추출 (향후 확장용)
 
 ## 주요 기능
 
