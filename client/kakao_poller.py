@@ -1715,8 +1715,7 @@ def poll_messages():
                             if MY_USER_ID and MY_USER_ID != decrypt_user_id:
                                 candidate_user_ids.append(('MY_USER_ID (fallback)', MY_USER_ID))
                             
-                            print(f"[복호화] 시도할 user_id 후보: {candidate_user_ids}, enc 후보: {enc_candidates}")
-                            print(f"[복호화] 메시지 길이: {len(message)}, base64 패턴: {is_base64_like}")
+                            print(f"[디버그] 복호화 시도할 user_id 후보: {candidate_user_ids}, enc 후보: {enc_candidates}")
                             
                             for candidate_name, candidate_id in candidate_user_ids:
                                 if decrypted_message:
@@ -1743,12 +1742,6 @@ def poll_messages():
                                         decrypted_message = None
                                 if decrypted_message:
                                     break
-                            
-                            if not decrypted_message:
-                                print(f"[✗] 메시지 복호화 실패: ID={msg_id}, 발신자 user_id={user_id}, enc_type={enc_type}")
-                                if user_id:
-                                    print(f"[디버그] 복호화 실패 원인 확인: 발신자 user_id={user_id}, enc_type={enc_type}, 메시지 길이={len(message)}")
-                                    print(f"[디버그] enc 후보: {enc_candidates}, user 후보: {candidate_user_ids}")
                             
                             if not user_id:
                                 print(f"[경고] 발신자 user_id가 없어 복호화 불가: ID={msg_id}, enc_type={enc_type}")
