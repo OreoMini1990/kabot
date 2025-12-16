@@ -8,6 +8,10 @@ CREATE TABLE IF NOT EXISTS public.reports (
   reported_message_id BIGINT NOT NULL REFERENCES public.chat_messages(id) ON DELETE CASCADE,
   reporter_user_id BIGINT REFERENCES public.users(id) ON DELETE SET NULL,
   reporter_name VARCHAR(255) NOT NULL,
+  reported_user_id BIGINT REFERENCES public.users(id) ON DELETE SET NULL,  -- 피신고자 user_id
+  reported_user_name VARCHAR(255),  -- 피신고자 닉네임 (하위 호환성)
+  original_message_text TEXT,  -- 원문 내용
+  original_message_time TIMESTAMPTZ,  -- 원문 작성 시간
   report_reason TEXT,  -- 신고 사유 (사용자가 입력한 내용)
   report_type VARCHAR(50) DEFAULT 'general',  -- 'spam', 'abuse', 'inappropriate', 'other', 'general'
   status VARCHAR(50) DEFAULT 'pending',  -- 'pending', 'reviewed', 'resolved', 'dismissed'
@@ -21,6 +25,7 @@ CREATE TABLE IF NOT EXISTS public.reports (
 -- 인덱스
 CREATE INDEX IF NOT EXISTS idx_reports_message_id ON public.reports(reported_message_id);
 CREATE INDEX IF NOT EXISTS idx_reports_reporter_user_id ON public.reports(reporter_user_id);
+CREATE INDEX IF NOT EXISTS idx_reports_reported_user_id ON public.reports(reported_user_id);
 CREATE INDEX IF NOT EXISTS idx_reports_status ON public.reports(status);
 CREATE INDEX IF NOT EXISTS idx_reports_created_at ON public.reports(created_at);
 

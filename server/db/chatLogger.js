@@ -870,10 +870,10 @@ async function checkNicknameChange(roomName, senderName, senderId) {
  */
 async function saveReport(reportedMessageId, reporterName, reporterId, reportReason, reportType = 'general') {
     try {
-        // 신고자 사용자 조회/생성
+        // 신고 대상 메시지 조회 (원문 내용, 피신고자 정보 포함)
         const { data: message } = await db.supabase
             .from('chat_messages')
-            .select('room_name')
+            .select('room_name, sender_name, sender_id, message_text, user_id, created_at')
             .eq('id', reportedMessageId)
             .single();
         
@@ -882,14 +882,46 @@ async function saveReport(reportedMessageId, reporterName, reporterId, reportRea
             return null;
         }
         
+        // 신고자 사용자 조회/생성
         const reporterUser = await getOrCreateUser(message.room_name, reporterName, reporterId);
         
+        // 피신고자 사용자 조회
+        const reportedUser = message.user_id 
+            ? await db.supabase
+                .from('users')
+                .select('id, display_name')
+                .eq('id', message.user_id)
+                .single()
+            : null;
+        
+        // 피신고자 사용자 조회
+        let reportedUserId = null;
+        let reportedUserName = message.sender_name;
+        
+        if (message.user_id) {
+            const { data: reportedUser } = await db.supabase
+                .from('users')
+                .select('id, display_name')
+                .eq('id', message.user_id)
+                .single();
+            
+            if (reportedUser) {
+                reportedUserId = reportedUser.id;
+                reportedUserName = reportedUser.display_name;
+            }
+        }
+        
+        // 신고 정보 저장
         const { data, error } = await db.supabase
             .from('reports')
             .insert({
                 reported_message_id: reportedMessageId,
                 reporter_user_id: reporterUser?.id || null,
                 reporter_name: reporterName,
+                reported_user_id: reportedUserId,
+                reported_user_name: reportedUserName,
+                original_message_text: message.message_text,
+                original_message_time: message.created_at,
                 report_reason: reportReason,
                 report_type: reportType,
                 status: 'pending'
@@ -901,6 +933,16 @@ async function saveReport(reportedMessageId, reporterName, reporterId, reportRea
             console.error('[채팅 로그] 신고 저장 실패:', error.message);
             return null;
         }
+        
+        // 로그 출력 (디버깅용)
+        console.log('[신고 저장 완료]', {
+            report_id: data.id,
+            reported_message_id: reportedMessageId,
+            reporter: reporterName,
+            reported_user: message.sender_name,
+            original_message: message.message_text.substring(0, 50) + '...',
+            report_reason: reportReason
+        });
         
         return data;
     } catch (error) {

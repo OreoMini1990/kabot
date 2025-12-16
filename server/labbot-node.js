@@ -39,7 +39,10 @@ const CONFIG = {
         MEMBERSHIP_SYSTEM: false, // 멤버십/내정보 기능 (false = 비활성화)
         NAVER_CAFE: process.env.NAVER_CAFE_ENABLED === 'true',  // 네이버 카페 질문 기능
         USE_ONNOTI: false        // onNoti 함수 사용 (WebSocket 환경에서는 false)
-    }
+    },
+    
+    // ========== 봇 설정 ==========
+    BOT_NAME: "랩봇"  // 봇 닉네임 (멘션용)
 };
 
 // 디버깅: 시작 시 NAVER_CAFE 기능 상태 로그
@@ -753,11 +756,41 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
     // 디버깅: 함수 호출 확인
     console.log(`[handleMessage] 호출됨: room="${room}", msg="${msg.substring(0, 50)}...", sender="${sender}", replyToMessageId=${replyToMessageId}`);
     
-    // ========== 신고 기능 처리 (답장 버튼 + "신고" 키워드) ==========
-    if (replyToMessageId && (msg.trim() === '신고' || msg.trim().startsWith('신고 '))) {
-        console.log('[신고] 신고 요청 감지:', { replyToMessageId, reporter: sender, reason: msg });
+    // ========== 신고 기능 처리 (답장 버튼 + @랩봇 멘션 + !신고) ==========
+    const msgTrimmed = msg.trim();
+    const hasMention = msgTrimmed.includes(`@${CONFIG.BOT_NAME}`) || msgTrimmed.includes('@랩봇');
+    const hasReportCommand = msgTrimmed.includes('!신고') || msgTrimmed.startsWith('!신고');
+    const hasReportKeyword = msgTrimmed === '신고' || msgTrimmed.startsWith('신고 ');
+    
+    // 답장 버튼을 눌렀지만 멘션 없이 "신고"만 입력한 경우
+    if (replyToMessageId && !hasMention && (hasReportKeyword || hasReportCommand)) {
+        const helpMessage = `📋 신고 방법 안내\n\n` +
+            `1️⃣ 신고하려는 메시지에 답장 버튼을 누르세요\n` +
+            `2️⃣ @${CONFIG.BOT_NAME} 을(를) 멘션하세요\n` +
+            `3️⃣ !신고 또는 !신고 [사유] 를 입력하세요\n\n` +
+            `예시: @${CONFIG.BOT_NAME} !신고 부적절한 내용입니다`;
+        replies.push(helpMessage);
+        return replies;
+    }
+    
+    // 답장 버튼 + 멘션 + !신고 형식 확인
+    if (replyToMessageId && hasMention && hasReportCommand) {
+        console.log('[신고] 신고 요청 감지:', { replyToMessageId, reporter: sender, message: msg });
         const chatLogger = require('./db/chatLogger');
-        const reportReason = msg.trim().substring(2).trim() || '신고 사유 없음';
+        
+        // !신고 다음 내용 추출 (신고 사유)
+        let reportReason = '신고 사유 없음';
+        if (hasReportCommand) {
+            const reportIndex = msgTrimmed.indexOf('!신고');
+            const afterReport = msgTrimmed.substring(reportIndex + 3).trim();
+            // 멘션 제거 (@랩봇 등)
+            const cleanedReason = afterReport.replace(/@\w+/g, '').trim();
+            if (cleanedReason) {
+                reportReason = cleanedReason;
+            }
+        }
+        
+        // 신고 처리
         const reportResult = await chatLogger.saveReport(
             replyToMessageId,
             sender,
@@ -767,11 +800,29 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         );
         
         if (reportResult) {
-            replies.push('✅ 신고가 접수되었습니다. 관리자가 검토 후 조치하겠습니다.');
+            const successMessage = `✅ 신고 접수 완료!\n\n` +
+                `📝 신고 내용이 관리자에게 전달되었습니다.\n` +
+                `🔍 검토 후 적절한 조치가 이루어집니다.\n\n` +
+                `감사합니다. 🙏`;
+            replies.push(successMessage);
         } else {
-            replies.push('❌ 신고 접수에 실패했습니다. 다시 시도해주세요.');
+            const errorMessage = `❌ 신고 접수 실패\n\n` +
+                `죄송합니다. 신고 접수 중 오류가 발생했습니다.\n` +
+                `잠시 후 다시 시도해주세요.`;
+            replies.push(errorMessage);
         }
         return replies; // 신고 처리 후 종료
+    }
+    
+    // 답장 버튼을 눌렀지만 형식이 맞지 않는 경우
+    if (replyToMessageId && (hasMention || hasReportCommand || hasReportKeyword)) {
+        const helpMessage = `📋 신고 방법 안내\n\n` +
+            `올바른 신고 형식:\n` +
+            `@${CONFIG.BOT_NAME} !신고 [사유]\n\n` +
+            `예시:\n` +
+            `@${CONFIG.BOT_NAME} !신고 부적절한 내용입니다`;
+        replies.push(helpMessage);
+        return replies;
     }
     
     // ========== 채팅방 필터링: "의운모" 채팅방만 반응 ==========
