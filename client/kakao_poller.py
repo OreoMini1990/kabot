@@ -869,7 +869,14 @@ def send_to_server(message_data, is_reaction=False):
         # 발신자 이름 조회 (Iris 방식)
         user_id = message_data.get("user_id")
         sender_name = None
-        if user_id:
+        
+        # message_data에 이미 복호화된 이름이 있으면 우선 사용 (poll_messages에서 추가한 값)
+        sender_name_from_data = message_data.get("user_name") or message_data.get("sender_name")
+        if sender_name_from_data:
+            sender_name = sender_name_from_data
+            print(f"[발신자] message_data에서 복호화된 이름 사용: \"{sender_name}\"")
+        elif user_id:
+            # message_data에 없으면 여기서 조회
             # Iris 원본 코드: getChatInfo에서 getNameOfUserId 호출
             sender_name = get_name_of_user_id(user_id)
             if sender_name:
