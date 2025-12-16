@@ -1847,6 +1847,14 @@ wss.on('connection', function connection(ws, req) {
           console.log(`[응답 생성] ⚠⚠⚠ 빈 응답 배열, 전송하지 않음 ⚠⚠⚠`);
           console.log(`[응답 생성] 디버깅 정보:`);
           console.log(`  - decryptedMessage: "${decryptedMessage?.substring(0, 100)}"`);
+          console.log(`  - decryptedMessage 길이: ${decryptedMessage?.length || 0}`);
+          const isStillEncrypted = decryptedMessage && decryptedMessage.length > 10 && decryptedMessage.length % 4 === 0 && /^[A-Za-z0-9+/=]+$/.test(decryptedMessage);
+          console.log(`  - decryptedMessage가 여전히 암호화된 상태인지: ${isStillEncrypted}`);
+          if (isStillEncrypted) {
+            console.log(`  ⚠ 경고: 메시지가 복호화되지 않아 명령어 매칭이 실패했을 수 있습니다.`);
+            console.log(`  ⚠ 해결: 클라이언트에서 복호화를 확인하거나, 복호화 키를 확인하세요.`);
+            console.log(`  ⚠ json.userId=${json?.userId}, json.user_id=${json?.user_id}, json.myUserId=${json?.myUserId}`);
+          }
           console.log(`  - decryptedRoomName: "${decryptedRoomName}"`);
           console.log(`  - senderName: "${senderName}"`);
           console.log(`  - isGroupChat: ${isGroupChat}`);
