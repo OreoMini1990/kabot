@@ -24,16 +24,8 @@ except ImportError:
     print("[참고] 이 모듈은 WebSocket 통신에 필수입니다.")
     exit(1)
 
-# 자체 복호화 라이브러리 (테스트된 kakaodecrypt 모듈 사용)
-try:
-    from Crypto.Cipher import AES
-    CRYPTO_AVAILABLE = True
-except ImportError:
-    CRYPTO_AVAILABLE = False
-    print("[경고] pycryptodome이 설치되지 않았습니다. 암호화된 메시지 복호화가 제한됩니다.")
-    print("[설치] pip install pycryptodome")
-
-# 테스트된 복호화 모듈 import (kakaodecrypt.py)
+# ⚠️ 복호화 로직 모듈화 (절대 수정 금지)
+# 복호화 로직은 별도 모듈로 분리되어 있으며, 이 모듈은 절대 수정하지 않습니다.
 try:
     import sys
     import os
@@ -41,12 +33,24 @@ try:
     script_dir = os.path.dirname(os.path.abspath(__file__))
     if script_dir not in sys.path:
         sys.path.insert(0, script_dir)
-    from kakaodecrypt import KakaoDecrypt
-    KAKAODECRYPT_AVAILABLE = True
+    from kakao_decrypt_module import decrypt_message, decrypt_kakaotalk_message, CRYPTO_AVAILABLE, KAKAODECRYPT_AVAILABLE
+    # kakaodecrypt 모듈도 import (채팅방 이름 복호화에 사용)
+    try:
+        from kakaodecrypt import KakaoDecrypt
+    except ImportError:
+        KakaoDecrypt = None
+    print("[✓] 복호화 모듈 로드 성공 (kakao_decrypt_module.py)")
 except ImportError as e:
+    print(f"[✗] 복호화 모듈 로드 실패: {e}")
+    print("[경고] 복호화 기능이 제한될 수 있습니다.")
+    CRYPTO_AVAILABLE = False
     KAKAODECRYPT_AVAILABLE = False
-    print(f"[경고] kakaodecrypt 모듈을 로드할 수 없습니다: {e}")
-    print("[정보] 자체 구현 복호화 로직을 사용합니다.")
+    KakaoDecrypt = None
+    # 폴백 함수 정의 (에러 방지)
+    def decrypt_message(*args, **kwargs):
+        return None
+    def decrypt_kakaotalk_message(*args, **kwargs):
+        return None
 
 # 카카오톡 DB 경로 (하율 패치로 접근 가능)
 DB_PATH = "/data/data/com.kakao.talk/databases/KakaoTalk.db"
@@ -75,12 +79,13 @@ sent_message_ids = set()
 # - AES/CBC/NoPadding 복호화 후 수동 패딩 제거
 DECRYPT_ENABLED = CRYPTO_AVAILABLE
 
-# 카카오톡 복호화 상수 (Java 코드에서 가져옴)
-# IV: signed byte 배열을 unsigned로 변환 (-36 -> 220, -11 -> 245, -32 -> 224, -31 -> 225)
-KAKAO_IV = bytes([15, 8, 1, 0, 25, 71, 37, 220, 21, 245, 23, 224, 225, 21, 12, 53])
-KAKAO_PASSWORD = bytes([22, 8, 9, 111, 2, 23, 43, 8, 33, 33, 10, 16, 3, 3, 7, 6])
+# ⚠️ 복호화 관련 상수 및 함수는 kakao_decrypt_module.py로 이동됨
+# 복호화 로직은 모듈에서 import하여 사용합니다.
+# 아래 코드는 레거시 호환성을 위해 주석 처리되었습니다.
+# 실제 사용은 kakao_decrypt_module.py의 함수들을 사용하세요.
 
-def incept(n):
+# (레거시 호환성: 채팅방 이름 복호화에서 사용하는 경우를 위해 일부 상수는 유지)
+# 하지만 실제 복호화 로직은 모듈에서 import하여 사용
     """
     Reimplementation of com.kakao.talk.dream.Projector.incept() from libdream.so
     encType 31 (실제로는 830819)에 대한 특별한 처리
@@ -811,326 +816,17 @@ def connect_websocket():
         print(f"[WebSocket 연결 오류] {e}")
         return False
 
-def generate_salt(user_id, enc_type):
-    """
-    카카오톡 복호화용 Salt 생성 (kakaodecrypt.py의 genSalt와 동일)
-    참고: kakaodecrypt.py의 KakaoDecrypt.genSalt() 사용 권장
-    """
-    # kakaodecrypt.py 모듈이 있으면 그것을 사용 (우선)
-    if KAKAODECRYPT_AVAILABLE:
-        try:
-            return KakaoDecrypt.genSalt(user_id, enc_type)
-        except Exception:
-            # 폴백: 자체 구현
-            pass
-    
-    # 폴백: 자체 구현 (kakaodecrypt.py와 동일한 로직)
-    salt = bytearray(16)
-    
-    # kakaodecrypt.py: if user_id <= 0: return b'\0' * 16
-    if user_id <= 0:
-        return bytes(salt)
-    
-    # kakaodecrypt.py: if enc < 0 or enc >= len(KAKAO_PREFIXES): raise ValueError
-    if enc_type < 0 or enc_type >= len(KAKAO_PREFIXES):
-        # 범위를 벗어나면 userId만 사용
-        salt_str = str(user_id)
-    else:
-        # kakaodecrypt.py: prefix = KAKAO_PREFIXES[enc]
-        prefix = KAKAO_PREFIXES[enc_type]
-        # kakaodecrypt.py: s = (prefix + str(user_id))[:16]
-        salt_str = (prefix + str(user_id))[:16]
-    
-    # kakaodecrypt.py: s = s + "\0" * (16 - len(s))
-    # (bytearray(16)로 이미 0으로 초기화되어 있음)
-    salt_bytes = salt_str.encode('utf-8')
-    for i in range(min(len(salt_bytes), 16)):
-        salt[i] = salt_bytes[i]
-    
-    return bytes(salt)
-
-def pkcs16adjust(a, aOff, b):
-    """PKCS12 키 유도에 필요한 헬퍼 함수"""
-    x = (b[len(b) - 1] & 0xff) + (a[aOff + len(b) - 1] & 0xff) + 1
-    a[aOff + len(b) - 1] = x % 256
-    x = x >> 8
-    for i in range(len(b)-2, -1, -1):
-        x = x + (b[i] & 0xff) + (a[aOff + i] & 0xff)
-        a[aOff + i] = x % 256
-        x = x >> 8
-
-def generate_secret_key(salt):
-    """
-    PKCS12 키 유도 방식 (Iris KakaoDecrypt.kt의 deriveKey() 함수 기반)
-    PBEWITHSHAAND256BITAES-CBC-BC 키 생성
-    - SHA-1 해시 사용
-    - iterations = 2 (실제로는 1번 반복: for j in range(1, 2))
-    - 256-bit 키 생성
-    """
-    # Java의 PBEWITHSHAAND256BITAES-CBC-BC는 PKCS12 키 유도 방식을 사용
-    # 제공된 Python 코드의 deriveKey() 함수와 동일한 방식
-    password = KAKAO_PASSWORD
-    # PKCS12 방식: password를 UTF-16-BE로 변환
-    # 제공된 코드: password = (password + b'\0').decode('ascii').encode('utf-16-be')
-    password = (password + b'\0').decode('ascii').encode('utf-16-be')
-    
-    hasher = hashlib.sha1()
-    v = hasher.block_size  # 64
-    u = hasher.digest_size  # 20
-    
-    D = [1] * v
-    S = [0] * v * int((len(salt) + v - 1) / v)
-    for i in range(len(S)):
-        S[i] = salt[i % len(salt)]
-    P = [0] * v * int((len(password) + v - 1) / v)
-    for i in range(len(P)):
-        P[i] = password[i % len(password)]
-    
-    I = S + P
-    
-    B = [0] * v
-    dkeySize = 32
-    c = int((dkeySize + u - 1) / u)
-    
-    dKey = [0] * dkeySize
-    for i in range(1, c+1):
-        hasher = hashlib.sha1()
-        hasher.update(bytes(D))
-        hasher.update(bytes(I))
-        A = list(hasher.digest())
-        
-        # Iris 방식: for (j in 1 until iterations) - iterations=2일 때 j=1만 실행 (1번 반복)
-        # Python의 range(1, 2)는 [1]만 생성하므로 1번 반복
-        for j in range(1, 2):  # iterations = 2일 때 j=1만 실행 (1번 반복)
-            hasher = hashlib.sha1()
-            hasher.update(bytes(A))
-            A = list(hasher.digest())
-        
-        for j in range(len(B)):
-            B[j] = A[j % len(A)]
-        
-        for j in range(int(len(I)/v)):
-            pkcs16adjust(I, j * v, B)
-        
-        start = (i - 1) * u
-        if i == c:
-            dKey[start : dkeySize] = A[0 : dkeySize-start]
-        else:
-            dKey[start : start+len(A)] = A[0 : len(A)]
-    
-    return bytes(dKey)
-
-def decrypt_kakaotalk_message(encrypted_text, user_id, enc_type=31, debug=False):
-    """
-    카카오톡 메시지 복호화 (테스트된 kakaodecrypt 모듈 사용)
-    
-    Args:
-        encrypted_text: base64로 인코딩된 암호화된 메시지
-        user_id: 카카오톡 사용자 ID (chatLog의 userId)
-        enc_type: 암호화 타입 (기본값 31)
-        debug: 디버그 로그 출력 여부
-    
-    Returns:
-        복호화된 메시지 문자열 또는 None
-    """
-    if not CRYPTO_AVAILABLE:
-        if debug:
-            print(f"[복호화] CRYPTO_AVAILABLE=False, 복호화 불가")
-        return None
-    
-    # 테스트된 kakaodecrypt 모듈 사용 (우선)
-    if KAKAODECRYPT_AVAILABLE:
-        try:
-            # 빈 메시지 체크
-            if not encrypted_text or encrypted_text == "{}" or encrypted_text == "[]":
-                if debug:
-                    print(f"[복호화] 빈 메시지 또는 특수 문자")
-                return encrypted_text
-            
-            if debug:
-                print(f"[복호화] kakaodecrypt 모듈 사용: user_id={user_id}, enc_type={enc_type}, 텍스트 길이={len(encrypted_text)}")
-            
-            # 테스트된 KakaoDecrypt.decrypt() 사용
-            result = KakaoDecrypt.decrypt(user_id, enc_type, encrypted_text)
-            
-            if result:
-                if debug:
-                    print(f"[복호화] 성공: 복호화된 텍스트 길이={len(result)}")
-                return result
-            else:
-                if debug:
-                    print(f"[복호화] 실패: KakaoDecrypt.decrypt()가 None 반환")
-                return None
-        except Exception as e:
-            if debug:
-                print(f"[복호화] kakaodecrypt 모듈 오류: {type(e).__name__}: {e}")
-                import traceback
-                traceback.print_exc()
-            # 폴백: 기존 로직 사용
-            pass
-    
-    # 폴백: 기존 자체 구현 로직 (kakaodecrypt 모듈이 없거나 실패한 경우)
-    try:
-        # 빈 메시지 체크
-        if not encrypted_text or encrypted_text == "{}" or encrypted_text == "[]":
-            if debug:
-                print(f"[복호화] 빈 메시지 또는 특수 문자")
-            return encrypted_text
-        
-        if debug:
-            print(f"[복호화] 자체 구현 사용: user_id={user_id}, enc_type={enc_type}, 텍스트 길이={len(encrypted_text)}")
-        
-        # Salt 생성
-        salt = generate_salt(user_id, enc_type)
-        if debug:
-            print(f"[복호화] Salt 생성 완료: {salt.hex()[:16]}...")
-        
-        # SecretKey 생성 (PKCS12 키 유도 방식 - Iris KakaoDecrypt.kt 기반)
-        secret_key = generate_secret_key(salt)
-        if debug:
-            print(f"[복호화] SecretKey 생성 완료: {secret_key.hex()[:16]}...")
-        
-        # AES/CBC/NoPadding 복호화 (Iris 방식)
-        cipher = AES.new(secret_key, AES.MODE_CBC, KAKAO_IV)
-        
-        # Base64 디코딩
-        decoded_bytes = base64.b64decode(encrypted_text)
-        
-        if len(decoded_bytes) == 0:
-            if debug:
-                print(f"[복호화] 빈 암호문")
-            return encrypted_text
-        
-        # 복호화 (Iris 방식: cipher.doFinal() with BadPaddingException handling)
-        try:
-            padded = cipher.decrypt(decoded_bytes)
-        except Exception as e:
-            # Iris 코드: BadPaddingException catch 후 원본 반환
-            if debug:
-                print(f"[복호화] BadPaddingException 또는 복호화 오류: {type(e).__name__}: {e}")
-                print(f"[복호화] 잘못된 키 또는 데이터일 수 있습니다. 원본 ciphertext 반환")
-            return encrypted_text
-        
-        # PKCS5Padding 제거
-        try:
-            if len(padded) == 0:
-                if debug:
-                    print(f"[복호화] 경고: 복호화된 데이터가 비어있음")
-                return encrypted_text
-            
-            padding_length = padded[-1] & 0xff
-            
-            if debug:
-                print(f"[복호화] 패딩 확인: padded 길이={len(padded)}, 마지막 바이트={padded[-1]}, padding_length={padding_length}")
-            
-            if padding_length <= 0 or padding_length > 16:
-                if debug:
-                    print(f"[복호화] 실패: 잘못된 패딩 길이 ({padding_length})")
-                return None
-            
-            if padding_length > len(padded):
-                if debug:
-                    print(f"[복호화] 실패: 패딩 길이({padding_length})가 데이터 길이({len(padded)})보다 큼")
-                return None
-            
-            plaintext = padded[:-padding_length]
-            
-            if debug:
-                print(f"[복호화] PKCS5 패딩 제거: padding_length={padding_length}, plaintext 길이={len(plaintext)}")
-            
-            if len(plaintext) == 0:
-                if debug:
-                    print(f"[복호화] 실패: 패딩 제거 후 길이가 0")
-                return None
-                
-        except (IndexError, ValueError) as e:
-            if debug:
-                print(f"[복호화] 패딩 제거 실패: {e}")
-            return None
-        
-        # UTF-8 디코딩
-        try:
-            decrypted_text = plaintext.decode('utf-8')
-            
-            # 복호화된 메시지가 유효한 텍스트인지 확인
-            has_control_chars = any(ord(c) < 32 and c not in '\n\r\t' for c in decrypted_text)
-            if has_control_chars:
-                if debug:
-                    print(f"[복호화] 경고: 제어 문자 포함, 바이너리 데이터일 수 있음")
-                control_char_count = sum(1 for c in decrypted_text if ord(c) < 32 and c not in '\n\r\t')
-                if control_char_count > len(decrypted_text) * 0.1:  # 10% 이상이면 실패
-                    if debug:
-                        print(f"[복호화] 실패: 제어 문자 비율이 너무 높음 ({control_char_count}/{len(decrypted_text)})")
-                    return None
-            
-            if debug:
-                print(f"[복호화] 성공: 복호화된 텍스트 길이={len(decrypted_text)}")
-            
-            return decrypted_text
-        except UnicodeDecodeError as e:
-            if debug:
-                print(f"[복호화] UTF-8 디코딩 실패: {e}")
-            return None
-        
-    except Exception as e:
-        if debug:
-            print(f"[복호화] 오류 발생: {type(e).__name__}: {e}")
-            import traceback
-            traceback.print_exc()
-        return None
-
-def decrypt_message(encrypted_message, v_field=None, user_id=None, enc_type=31, debug=False):
-    """
-    암호화된 메시지 복호화 시도
-    
-    1. v_field에서 enc 추출
-    2. 카카오톡 복호화 로직 시도 (user_id가 있는 경우)
-    3. base64 디코딩 시도
-    """
-    if not encrypted_message:
-        return None
-    
-    # 1. v_field에서 enc 추출
-    if v_field and isinstance(v_field, str):
-        try:
-            v_parsed = json.loads(v_field)
-            if isinstance(v_parsed, dict) and "enc" in v_parsed:
-                v_enc_type = v_parsed["enc"]
-                if v_enc_type is not None:
-                    enc_type = v_enc_type
-                    if debug:
-                        print(f"[복호화] v 필드에서 enc 추출: {enc_type}")
-        except (json.JSONDecodeError, TypeError, KeyError):
-            # JSON 파싱 실패 시 기존 enc_type 사용
-            pass
-    
-    # 2. 카카오톡 복호화 로직 시도 (user_id가 있는 경우)
-    if CRYPTO_AVAILABLE and user_id:
-        try:
-            decrypted = decrypt_kakaotalk_message(encrypted_message, user_id, enc_type, debug=debug)
-            if decrypted:
-                return decrypted
-        except Exception as e:
-            if debug:
-                print(f"[복호화] decrypt_kakaotalk_message 오류: {type(e).__name__}: {e}")
-            pass
-    
-    # 3. base64 디코딩 시도 (간단한 경우)
-    try:
-        if isinstance(encrypted_message, str):
-            decoded_bytes = base64.b64decode(encrypted_message)
-            # UTF-8로 디코딩 시도
-            try:
-                decrypted = decoded_bytes.decode('utf-8')
-                # 유효한 텍스트인지 확인 (base64만 있는 경우 제외)
-                if decrypted and not all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in decrypted[:50]):
-                    return decrypted
-            except UnicodeDecodeError:
-                pass
-    except Exception:
-        pass
-    
-    return None
+# ⚠️ 복호화 관련 함수들은 kakao_decrypt_module.py로 이동되었습니다.
+# 이제 복호화 로직은 모듈에서 import하여 사용합니다.
+# 아래 함수들은 제거되었으며, kakao_decrypt_module.py를 사용하세요.
+# 
+# 제거된 함수들:
+# - generate_salt() -> kakao_decrypt_module.generate_salt()
+# - generate_secret_key() -> kakao_decrypt_module.generate_secret_key()
+# - decrypt_kakaotalk_message() -> kakao_decrypt_module.decrypt_kakaotalk_message()
+# - decrypt_message() -> kakao_decrypt_module.decrypt_message()
+# 
+# ⚠️ 경고: 복호화 로직은 절대 수정하지 마세요!
 
 # [제거됨] send_to_kakaotalk 함수
 # 이제 Bridge APK가 메시지 전송을 담당하므로 클라이언트에서는 전송 로직이 필요 없습니다.

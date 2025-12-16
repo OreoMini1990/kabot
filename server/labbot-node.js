@@ -782,27 +782,14 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         }
     }
     
-    // ========== 신고 기능 처리 (답장 버튼 + @랩봇 멘션 + !신고) ==========
+    // ========== 신고 기능 처리 (답장 버튼 + !신고만으로 처리, 멘션 불필요) ==========
     const msgTrimmed = processedMsg.trim();
     const msgLower = msgTrimmed.toLowerCase();
-    const hasMention = msgTrimmed.includes(`@${CONFIG.BOT_NAME}`) || msgTrimmed.includes('@랩봇');
     // !신고 또는 ! 신고 (공백 포함) 모두 처리
     const hasReportCommand = /![\s]*신고/.test(msgTrimmed) || msgLower.includes('!신고');
-    const hasReportKeyword = msgTrimmed === '신고' || msgTrimmed.startsWith('신고 ');
     
-    // 답장 버튼을 눌렀지만 멘션 없이 "신고"만 입력한 경우
-    if (replyToMessageId && !hasMention && (hasReportKeyword || hasReportCommand)) {
-        const helpMessage = `📋 신고 방법 안내\n\n` +
-            `1️⃣ 신고하려는 메시지에 답장 버튼을 누르세요\n` +
-            `2️⃣ @${CONFIG.BOT_NAME} 을(를) 멘션하세요\n` +
-            `3️⃣ !신고 또는 !신고 [사유] 를 입력하세요\n\n` +
-            `예시: @${CONFIG.BOT_NAME} !신고 부적절한 내용입니다`;
-        replies.push(helpMessage);
-        return replies;
-    }
-    
-    // 답장 버튼 + 멘션 + !신고 형식 확인 (replyToMessageId가 없어도 멘션 + !신고면 처리)
-    if (hasMention && hasReportCommand) {
+    // 답장 버튼을 누르고 !신고만 입력한 경우 (멘션 불필요)
+    if (replyToMessageId && hasReportCommand) {
         console.log('[신고] 신고 요청 감지:', { replyToMessageId, reporter: sender, message: msg });
         
         // !신고 다음 내용 추출 (신고 사유)
@@ -820,40 +807,17 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
             }
         }
         
-        // replyToMessageId가 없으면 최근 메시지 중 신고 가능한 메시지 찾기
-        let targetMessageId = replyToMessageId;
-        if (!targetMessageId) {
-            try {
-                // 최근 10개 메시지 중 같은 채팅방의 메시지 찾기
-                const recentMessages = await chatLogger.getChatMessagesByPeriod(
-                    room,
-                    new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5분 이내
-                    new Date().toISOString(),
-                    10
-                );
-                
-                // 가장 최근 메시지 사용 (답장 버튼을 누르지 않았을 경우)
-                if (recentMessages && recentMessages.length > 0) {
-                    // 현재 사용자가 아닌 다른 사용자의 메시지 찾기
-                    const otherUserMessage = recentMessages.find(m => m.sender_name !== extractSenderName(sender));
-                    if (otherUserMessage) {
-                        targetMessageId = otherUserMessage.id;
-                        console.log('[신고] replyToMessageId 없음, 최근 메시지 사용:', targetMessageId);
-                    }
-                }
-            } catch (error) {
-                console.error('[신고] 최근 메시지 조회 실패:', error.message);
-            }
-        }
-        
-        if (!targetMessageId) {
+        // replyToMessageId가 필수 (답장 버튼을 눌러야 함)
+        if (!replyToMessageId) {
             const helpMessage = `📋 신고 방법 안내\n\n` +
                 `신고하려는 메시지에 답장 버튼을 누르고\n` +
-                `@${CONFIG.BOT_NAME} !신고 [사유] 를 입력하세요\n\n` +
-                `예시: @${CONFIG.BOT_NAME} !신고 부적절한 내용입니다`;
+                `!신고 또는 !신고 [사유] 를 입력하세요\n\n` +
+                `예시: !신고 부적절한 내용입니다`;
             replies.push(helpMessage);
             return replies;
         }
+        
+        const targetMessageId = replyToMessageId;
         
         // 신고 처리
         console.log('[신고] 신고 요청 처리 시작:', {
@@ -897,16 +861,8 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         return replies; // 신고 처리 후 종료
     }
     
-    // 답장 버튼을 눌렀지만 형식이 맞지 않는 경우
-    if (replyToMessageId && (hasMention || hasReportCommand || hasReportKeyword)) {
-        const helpMessage = `📋 신고 방법 안내\n\n` +
-            `올바른 신고 형식:\n` +
-            `@${CONFIG.BOT_NAME} !신고 [사유]\n\n` +
-            `예시:\n` +
-            `@${CONFIG.BOT_NAME} !신고 부적절한 내용입니다`;
-        replies.push(helpMessage);
-        return replies;
-    }
+    // 답장 버튼을 눌렀지만 형식이 맞지 않는 경우 (더 이상 멘션 불필요)
+    // 이 부분은 제거 (답장 + !신고만으로 처리하므로)
     
     // ========== 채팅방 필터링: "의운모" 채팅방만 반응 ==========
     // room 파라미터가 채팅방 이름 또는 ID일 수 있음
@@ -1153,8 +1109,8 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
             
             const clubid = parseInt(clubidStr, 10);
             const menuid = parseInt(menuidStr, 10);
-            // headid는 문자열로 전달 ("단톡방질문")
-            const headid = headidStr || "단톡방질문"; // 기본값: "단톡방질문"
+            // headid는 항상 "단톡방질문" 문자열로 전달
+            const headid = "단톡방질문"; // 항상 "단톡방질문"으로 고정
             
             if (isNaN(clubid) || isNaN(menuid)) {
                 console.error(`[네이버 카페] clubid 또는 menuid가 유효한 숫자가 아닙니다. clubid=${clubidStr}(${clubid}), menuid=${menuidStr}(${menuid})`);
@@ -1162,15 +1118,15 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
                 return replies;
             }
             
-            console.log(`[네이버 카페] headid 설정: "${headid}" (문자열로 전달)`);
+            console.log(`[네이버 카페] headid 설정: "${headid}" (문자열로 전달, 항상 "단톡방질문")`);
             
             // 네이버 카페 질문 서비스 호출
             const { submitQuestion, saveQuestionWithoutPermission } = require('./integrations/naverCafe/questionService');
             const senderName = extractSenderName(sender);
             
-            // headid 검증 및 로깅
-            const finalHeadid = (headid !== null && headid !== undefined && !isNaN(headid)) ? headid : null;
-            console.log(`[네이버 카페] headid 최종값: ${finalHeadid} (원본: ${headidStr}, 파싱: ${headid})`);
+            // headid는 항상 "단톡방질문" 문자열로 전달
+            const finalHeadid = headid;
+            console.log(`[네이버 카페] headid 최종값: "${finalHeadid}" (문자열)`);
             
             // 네이버 카페 API 호출을 동기적으로 처리하여 완료 후 즉시 응답 반환
             // Bridge APK가 접근성 fallback을 사용하여 알림 없이도 즉시 전송 가능
