@@ -1626,7 +1626,8 @@ wss.on('connection', function connection(ws, req) {
         
         // chat_id 추출 (클라이언트에서 숫자로 변환 가능하도록)
         // json.chat_id가 있으면 사용 (클라이언트에서 명시적으로 전송한 값)
-        let chatId = json?.chat_id;
+        // 1560번 줄에서 이미 선언되었으므로 재할당만 수행
+        chatId = json?.chat_id || chatId;
         
         // 디버그: chat_id 추출 과정 확인
         console.log(`[응답 생성] chat_id 추출: json.chat_id=${json?.chat_id}, 타입=${typeof json?.chat_id}`);
