@@ -628,6 +628,10 @@ def get_new_messages():
                 select_columns.append("userId")
             if "encType" in available_columns:
                 select_columns.append("encType")
+            if "type" in available_columns:
+                select_columns.append("type")  # 메시지 타입 (반응 감지용)
+            if "attachment" in available_columns:
+                select_columns.append("attachment")  # 첨부 정보 (반응 정보 포함 가능)
             
             # 쿼리 생성
             columns_str = ", ".join(select_columns)
@@ -1132,10 +1136,47 @@ def decrypt_message(encrypted_message, v_field=None, user_id=None, enc_type=31, 
 # 이제 Bridge APK가 메시지 전송을 담당하므로 클라이언트에서는 전송 로직이 필요 없습니다.
 # Bridge APK가 서버로부터 type: "send" 메시지를 받아서 카카오톡으로 전송합니다.
 
-def send_to_server(message_data):
-    """서버로 메시지 전송 (WebSocket)"""
+def send_to_server(message_data, is_reaction=False):
+    """서버로 메시지 전송 (WebSocket)
+    
+    Args:
+        message_data: 전송할 메시지 데이터
+        is_reaction: 반응 메시지 여부 (기본값: False)
+    """
     global ws_connection, last_message_room
     
+    # 반응 메시지인 경우 바로 전송
+    if is_reaction:
+        # 반응 메시지는 이미 올바른 형식으로 구성되어 있음
+        payload = message_data
+        
+        # WebSocket 연결 확인
+        if ws_connection is None:
+            print("[경고] WebSocket 연결 없음. 재연결 시도...")
+            if not connect_websocket():
+                print("[✗] WebSocket 재연결 실패")
+                return False
+        
+        # WebSocket으로 반응 정보 전송
+        with ws_lock:
+            if ws_connection and ws_connection.sock and ws_connection.sock.connected:
+                try:
+                    payload_str = json.dumps(payload, ensure_ascii=False)
+                    print(f"[전송] 반응 정보 전송: 타입={payload.get('json', {}).get('reaction_type', 'unknown')}, 대상={payload.get('json', {}).get('target_message_id', 'unknown')}")
+                    ws_connection.send(payload_str)
+                    print(f"[✓] 반응 정보 전송 성공")
+                    return True
+                except Exception as e:
+                    print(f"[✗] 반응 정보 전송 오류: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    ws_connection = None
+                    return False
+            else:
+                print("[✗] WebSocket 연결 없음")
+                return False
+    
+    # 일반 메시지 처리
     try:
         # room과 sender를 문자열로 변환 (서버가 문자열을 기대함)
         chat_id = message_data.get("chat_id", "")
@@ -1514,6 +1555,8 @@ def poll_messages():
                         kakao_user_id = None
                         enc_type = 31  # 기본값
                         is_mine = False  # 자신이 보낸 메시지 여부
+                        msg_type = None  # 메시지 타입
+                        attachment = None  # 첨부 정보
                         
                         if len(msg) >= 6:
                             v_field = msg[5]
@@ -1546,6 +1589,90 @@ def poll_messages():
                                 enc_type = db_enc_type
                             else:
                                 enc_type = 31  # 기본값
+                        if len(msg) >= 9:
+                            msg_type = msg[8]  # 메시지 타입
+                        if len(msg) >= 10:
+                            attachment = msg[9]  # 첨부 정보
+                        
+                        # 반응(reaction) 메시지 처리
+                        is_reaction = False
+                        reaction_type = None
+                        target_message_id = None
+                        
+                        # 1. type 컬럼에서 반응 타입 확인
+                        if msg_type:
+                            # 카카오톡 메시지 타입: 일반적으로 숫자로 저장됨
+                            # 반응 관련 타입: 71 (선물), 기타 반응 타입 확인 필요
+                            if isinstance(msg_type, (int, str)):
+                                msg_type_str = str(msg_type)
+                                # 반응 관련 타입 확인 (일반적으로 특정 숫자 범위)
+                                # 실제 타입 값은 카카오톡 버전에 따라 다를 수 있음
+                                if msg_type_str in ["71", "72", "73"]:  # 반응 관련 타입 (확인 필요)
+                                    is_reaction = True
+                                    reaction_type = "thumbs_up"  # 기본값
+                        
+                        # 2. attachment 필드에서 반응 정보 확인
+                        if attachment and not is_reaction:
+                            try:
+                                if isinstance(attachment, str):
+                                    attachment_json = json.loads(attachment)
+                                    if isinstance(attachment_json, dict):
+                                        # 반응 정보 확인
+                                        if "reaction" in attachment_json or "like" in attachment_json or "thumbs" in attachment_json:
+                                            is_reaction = True
+                                            reaction_type = attachment_json.get("reaction") or attachment_json.get("like") or attachment_json.get("thumbs") or "thumbs_up"
+                                            target_message_id = attachment_json.get("message_id") or attachment_json.get("target_id")
+                            except (json.JSONDecodeError, TypeError, KeyError):
+                                pass
+                        
+                        # 3. message 필드에서 반응 정보 확인 (fallback)
+                        if not is_reaction and message:
+                            # 메시지가 반응 이모지만 있는 경우 (예: 👍)
+                            reaction_emojis = ["👍", "❤️", "😆", "😮", "😢", "🙏"]
+                            if message.strip() in reaction_emojis:
+                                is_reaction = True
+                                reaction_type = "thumbs_up"  # 기본값
+                        
+                        # 반응 메시지인 경우 별도 처리
+                        if is_reaction:
+                            # 반응 정보를 서버로 전송
+                            try:
+                                # 발신자 이름 조회
+                                sender_name = get_name_of_user_id(user_id) if user_id else None
+                                sender = f"{sender_name}/{user_id}" if sender_name and user_id else (str(user_id) if user_id else "")
+                                
+                                # 채팅방 정보 조회
+                                room_data = get_chat_room_data(chat_id) if chat_id else None
+                                room_name_raw = room_data.get('name') if room_data else None
+                                
+                                # 반응 메시지 데이터 구성
+                                reaction_data = {
+                                    "type": "reaction",
+                                    "room": room_name_raw or str(chat_id) if chat_id else "",
+                                    "sender": sender,
+                                    "json": {
+                                        "target_message_id": target_message_id or msg_id,  # 반응 대상 메시지 ID
+                                        "reaction_type": reaction_type or "thumbs_up",
+                                        "message_id": msg_id,  # 반응 메시지 자체의 ID
+                                        "chat_id": chat_id,
+                                        "user_id": user_id,
+                                        "created_at": created_at
+                                    }
+                                }
+                                
+                                # 서버로 반응 정보 전송
+                                if send_to_server(reaction_data, is_reaction=True):
+                                    print(f"[✓] 반응 정보 전송 성공: ID={msg_id}, 타입={reaction_type}, 대상={target_message_id or msg_id}")
+                                    sent_count += 1
+                                    sent_message_ids.add(msg_id)
+                                else:
+                                    print(f"[✗] 반응 정보 전송 실패: ID={msg_id}")
+                                    sent_message_ids.discard(msg_id)
+                            except Exception as e:
+                                print(f"[오류] 반응 정보 처리 실패: ID={msg_id}, 오류={e}")
+                                sent_message_ids.add(msg_id)  # 오류 발생해도 처리된 것으로 표시
+                            
+                            continue  # 반응 메시지는 일반 메시지 처리 스킵
                         
                         max_id = max(max_id, msg_id)
                         
