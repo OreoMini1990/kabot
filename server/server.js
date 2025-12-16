@@ -1593,22 +1593,21 @@ wss.on('connection', function connection(ws, req) {
         }
         
         // json에서 추가 정보 확인 (복호화된 값 우선)
+        // 클라이언트에서 이미 복호화된 user_name 또는 sender_name 사용 (최우선)
         if (json) {
-          // json.user_name이 복호화된 값일 수 있음
-          if (json.user_name && typeof json.user_name === 'string') {
-            // 암호화된 형태가 아니면 사용
-            const isEncrypted = json.user_name.length > 10 && 
-                               json.user_name.length % 4 === 0 &&
-                               /^[A-Za-z0-9+/=]+$/.test(json.user_name);
-            if (!isEncrypted) {
-              senderName = json.user_name;
-            }
-          } else if (json.userName && typeof json.userName === 'string') {
-            const isEncrypted = json.userName.length > 10 && 
-                               json.userName.length % 4 === 0 &&
-                               /^[A-Za-z0-9+/=]+$/.test(json.userName);
-            if (!isEncrypted) {
-              senderName = json.userName;
+          // 클라이언트에서 복호화된 이름이 있으면 우선 사용
+          const clientDecryptedName = json.user_name || json.sender_name || json.userName;
+          if (clientDecryptedName && typeof clientDecryptedName === 'string') {
+            // 암호화된 형태가 아니면 사용 (클라이언트에서 이미 복호화했을 가능성)
+            const isEncrypted = clientDecryptedName.length > 10 && 
+                               clientDecryptedName.length % 4 === 0 &&
+                               /^[A-Za-z0-9+/=]+$/.test(clientDecryptedName);
+            if (!isEncrypted && clientDecryptedName !== '.' && !clientDecryptedName.startsWith('/')) {
+              senderName = clientDecryptedName;
+              console.log(`[발신자] 클라이언트에서 복호화된 이름 사용: "${senderName}"`);
+            } else if (isEncrypted) {
+              // 여전히 암호화되어 있으면 서버에서 복호화 시도
+              console.log(`[발신자] 클라이언트에서 보낸 이름이 여전히 암호화되어 있음, 서버에서 복호화 시도`);
             }
           }
           
