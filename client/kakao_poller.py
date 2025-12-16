@@ -1728,11 +1728,24 @@ def poll_messages():
                                         decrypt_user_id_int = int(candidate_id)
                                         if decrypt_user_id_int > 0:
                                             # 복호화 시도 (debug=True로 상세 로그)
+                                            print(f"[복호화 시도] {candidate_name}: user_id={candidate_id}, enc={enc_try}, 메시지 길이={len(message)}")
                                             decrypted_result = decrypt_message(message, v_field, decrypt_user_id_int, enc_try, debug=True)
+                                            
+                                            attempt_result = 'failed'
+                                            if decrypted_result:
+                                                if decrypted_result == message:
+                                                    attempt_result = 'no_change'
+                                                else:
+                                                    has_control_chars = any(ord(c) < 32 and c not in '\n\r\t' for c in decrypted_result)
+                                                    if not has_control_chars:
+                                                        attempt_result = 'success'
+                                                    else:
+                                                        attempt_result = 'garbled'
+                                            
                                             decryption_attempts.append({
                                                 'user_id': candidate_id,
                                                 'enc': enc_try,
-                                                'result': 'success' if (decrypted_result and decrypted_result != message) else 'failed',
+                                                'result': attempt_result,
                                                 'name': candidate_name
                                             })
                                             
@@ -1751,12 +1764,19 @@ def poll_messages():
                                             else:
                                                 if decrypted_result == message:
                                                     print(f"[복호화] 결과가 원본과 동일: 복호화되지 않음 (user_id={candidate_id}, enc={enc_try})")
-                                                else:
+                                                elif decrypted_result is None:
                                                     print(f"[복호화] None 반환: 복호화 실패 (user_id={candidate_id}, enc={enc_try})")
                                     except Exception as e:
                                         print(f"[복호화] 예외 발생 ({candidate_name}): user_id={candidate_id}, enc={enc_try}, 오류={type(e).__name__}: {e}")
                                         import traceback
                                         traceback.print_exc()
+                                        decryption_attempts.append({
+                                            'user_id': candidate_id,
+                                            'enc': enc_try,
+                                            'result': 'exception',
+                                            'name': candidate_name,
+                                            'error': str(e)
+                                        })
                                 if decrypted_message:
                                     break
                             
