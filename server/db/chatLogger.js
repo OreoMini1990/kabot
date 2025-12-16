@@ -499,12 +499,16 @@ async function getChatMessagesByPeriod(roomName, startDate, endDate, limit = 100
  */
 async function getUserChatStatistics(roomName, startDate, endDate) {
     try {
+        // startDate와 endDate를 날짜만 추출 (YYYY-MM-DD)
+        const startDateOnly = new Date(startDate).toISOString().split('T')[0];
+        const endDateOnly = new Date(endDate).toISOString().split('T')[0];
+        
         const { data, error } = await db.supabase
             .from('user_statistics')
-            .select('*')
+            .select('user_name, user_id, message_count, total_char_count, total_word_count, received_reactions_count')
             .eq('room_name', roomName)
-            .gte('date', startDate)
-            .lte('date', endDate)
+            .gte('date', startDateOnly)
+            .lte('date', endDateOnly)
             .order('message_count', { ascending: false });
         
         if (error) {
@@ -512,7 +516,28 @@ async function getUserChatStatistics(roomName, startDate, endDate) {
             return [];
         }
         
-        return data || [];
+        // 사용자별로 집계 (여러 날짜의 통계를 합산)
+        const userStats = {};
+        (data || []).forEach(stat => {
+            const userName = stat.user_name || '알 수 없음';
+            if (!userStats[userName]) {
+                userStats[userName] = {
+                    user_name: userName,
+                    user_id: stat.user_id,
+                    message_count: 0,
+                    total_char_count: 0,
+                    total_word_count: 0,
+                    received_reactions_count: 0
+                };
+            }
+            userStats[userName].message_count += stat.message_count || 0;
+            userStats[userName].total_char_count += stat.total_char_count || 0;
+            userStats[userName].total_word_count += stat.total_word_count || 0;
+            userStats[userName].received_reactions_count += stat.received_reactions_count || 0;
+        });
+        
+        // 배열로 변환하고 메시지 수로 정렬
+        return Object.values(userStats).sort((a, b) => b.message_count - a.message_count);
     } catch (error) {
         console.error('[채팅 로그] 통계 조회 중 오류:', error.message);
         return [];
@@ -871,14 +896,48 @@ async function checkNicknameChange(roomName, senderName, senderId) {
 async function saveReport(reportedMessageId, reporterName, reporterId, reportReason, reportType = 'general') {
     try {
         // 신고 대상 메시지 조회 (원문 내용, 피신고자 정보 포함)
-        const { data: message } = await db.supabase
+        // reportedMessageId가 DB의 id일 수도 있고, 카카오톡의 chat_id일 수도 있음
+        let message = null;
+        
+        // 1. 먼저 id로 검색
+        const { data: messageById } = await db.supabase
             .from('chat_messages')
-            .select('room_name, sender_name, sender_id, message_text, user_id, created_at')
+            .select('id, room_name, sender_name, sender_id, message_text, user_id, created_at, metadata')
             .eq('id', reportedMessageId)
             .single();
         
+        if (messageById) {
+            message = messageById;
+        } else {
+            // 2. metadata의 chat_id로 검색
+            const { data: messageByChatId } = await db.supabase
+                .from('chat_messages')
+                .select('id, room_name, sender_name, sender_id, message_text, user_id, created_at, metadata')
+                .eq('metadata->>chat_id', String(reportedMessageId))
+                .single();
+            
+            if (messageByChatId) {
+                message = messageByChatId;
+            } else {
+                // 3. 숫자로 변환 가능한 경우 숫자로도 시도
+                const numericId = parseInt(reportedMessageId);
+                if (!isNaN(numericId)) {
+                    const { data: messageByNumericId } = await db.supabase
+                        .from('chat_messages')
+                        .select('id, room_name, sender_name, sender_id, message_text, user_id, created_at, metadata')
+                        .eq('id', numericId)
+                        .single();
+                    
+                    if (messageByNumericId) {
+                        message = messageByNumericId;
+                    }
+                }
+            }
+        }
+        
         if (!message) {
             console.error('[채팅 로그] 신고 대상 메시지를 찾을 수 없음:', reportedMessageId);
+            console.error('[채팅 로그] id, metadata->>chat_id, numericId 모두 시도했으나 실패');
             return null;
         }
         

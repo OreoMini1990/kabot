@@ -631,70 +631,64 @@ function recordChatCount(sender) {
     writeFileSafe(chatCountFile, currentCount.toString());
 }
 
-function getChatRankings(startDate, endDate, title, sender) {
-    const userChatCounts = {};
-    const chatCountRoot = CONFIG.FILE_PATHS.CHAT_COUNT;
-    
-    for (let date = new Date(startDate); date <= endDate; date.setDate(date.getDate() + 1)) {
-        const year = date.getFullYear();
-        const month = ("0" + (date.getMonth() + 1)).slice(-2);
-        const day = ("0" + date.getDate()).slice(-2);
-        const dayFolder = path.join(chatCountRoot, year + "-" + month, day);
+async function getChatRankings(startDate, endDate, title, sender, room = '의운모') {
+    try {
+        // DB에서 통계 조회
+        const stats = await chatLogger.getUserChatStatistics(room, startDate.toISOString(), endDate.toISOString());
         
-        if (fs.existsSync(dayFolder)) {
-            const files = fs.readdirSync(dayFolder);
-            for (let i = 0; i < files.length; i++) {
-                const fileName = files[i];
-                if (fileName.endsWith(".txt")) {
-                    const user = fileName.replace(".txt", "").replace(/☞/g, '/');
-                    const filePath = path.join(dayFolder, fileName);
-                    const count = parseInt(readFileSafe(filePath)) || 0;
-                    userChatCounts[user] = (userChatCounts[user] || 0) + count;
-                }
+        if (!stats || stats.length === 0) {
+            return `${title}\n────────\n• 그룹반 전체횟수: 0회\n• ${sender}: 순위 없음\n\n📭 해당 기간에 채팅 데이터가 없습니다.`;
+        }
+        
+        // 사용자별 메시지 수 집계
+        const userChatCounts = {};
+        let totalChats = 0;
+        
+        stats.forEach(stat => {
+            const userName = stat.user_name || stat.display_name || '알 수 없음';
+            const count = stat.message_count || 0;
+            userChatCounts[userName] = (userChatCounts[userName] || 0) + count;
+            totalChats += count;
+        });
+        
+        // 정렬
+        const sortedUsers = Object.keys(userChatCounts).sort(function(a, b) {
+            return userChatCounts[b] - userChatCounts[a];
+        });
+        
+        let responseText = title + "\n" + "\u200b".repeat(500) + "\n────────\n";
+        responseText += "• 그룹반 전체횟수: " + totalChats.toLocaleString() + "회\n";
+        
+        const senderRank = sortedUsers.indexOf(sender) + 1;
+        if (senderRank > 0) {
+            responseText += "• " + sender + ": " + senderRank + "위\n\n";
+        } else {
+            responseText += "• " + sender + ": 순위 없음\n\n";
+        }
+        
+        const medals = ["🥇", "🥈", "🥉"];
+        for (let i = 0; i < sortedUsers.length; i++) {
+            const user = sortedUsers[i];
+            const count = userChatCounts[user];
+            const percentage = totalChats > 0 ? ((count / totalChats) * 100).toFixed(2) : "0.00";
+            
+            let rankText = (i + 1) + "위: ";
+            if (i < 3) {
+                rankText = medals[i] + " " + rankText;
+            }
+            
+            responseText += rankText + user + " (" + count.toLocaleString() + "회 | " + percentage + "%)\n";
+            
+            if ((i + 1) % 10 === 0) {
+                responseText += "\n";
             }
         }
+        
+        return responseText;
+    } catch (error) {
+        console.error('[통계] getChatRankings 오류:', error.message);
+        return `${title}\n────────\n❌ 통계 조회 중 오류가 발생했습니다: ${error.message}`;
     }
-
-    let totalChats = 0;
-    for (const user in userChatCounts) {
-        if (userChatCounts.hasOwnProperty(user)) {
-            totalChats += userChatCounts[user];
-        }
-    }
-
-    const sortedUsers = Object.keys(userChatCounts).sort(function(a, b) {
-        return userChatCounts[b] - userChatCounts[a];
-    });
-
-    let responseText = title + "\n" + "\u200b".repeat(500) + "\n────────\n";
-    responseText += "• 그룹반 전체횟수: " + totalChats.toLocaleString() + "회\n";
-
-    const senderRank = sortedUsers.indexOf(sender) + 1;
-    if (senderRank > 0) {
-        responseText += "• " + sender + ": " + senderRank + "위\n\n";
-    } else {
-        responseText += "• " + sender + ": 순위 없음\n\n";
-    }
-
-    const medals = ["🥇", "🥈", "🥉"];
-    for (let i = 0; i < sortedUsers.length; i++) {
-        const user = sortedUsers[i];
-        const count = userChatCounts[user];
-        const percentage = totalChats > 0 ? ((count / totalChats) * 100).toFixed(2) : "0.00";
-
-        let rankText = (i + 1) + "위: ";
-        if (i < 3) {
-            rankText = medals[i] + " " + rankText;
-        }
-
-        responseText += rankText + user + " (" + count.toLocaleString() + "회 | " + percentage + "%)\n";
-
-        if ((i + 1) % 10 === 0) {
-            responseText += "\n";
-        }
-    }
-
-    return responseText;
 }
 
 // ========== 상점 관리 ==========
@@ -935,11 +929,24 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
                 );
                 
                 // 같은 사용자의 같은 제목/내용 질문 확인
-                const duplicateQuestion = recentQuestions?.find(msg => 
-                    msg.sender_name === questionSenderName &&
-                    msg.message_text && 
-                    (msg.message_text.includes(title) || msg.message_text.includes(content.substring(0, 50)))
-                );
+                // 정확한 비교를 위해 제목과 내용을 모두 확인
+                const duplicateQuestion = recentQuestions?.find(msg => {
+                    if (msg.sender_name !== questionSenderName || !msg.message_text) {
+                        return false;
+                    }
+                    
+                    // 제목이 포함되어 있는지 확인
+                    const hasTitle = msg.message_text.includes(title);
+                    
+                    // 내용의 첫 50자 이상이 일치하는지 확인 (단순 includes가 아닌 더 정확한 비교)
+                    const msgTextLower = msg.message_text.toLowerCase().trim();
+                    const contentLower = content.toLowerCase().trim();
+                    const contentFirst50 = contentLower.substring(0, 50);
+                    const hasContent = msgTextLower.includes(contentFirst50) && contentFirst50.length >= 30; // 최소 30자 이상 일치해야 함
+                    
+                    // 제목과 내용이 모두 일치하거나, 내용이 80% 이상 일치하는 경우 중복으로 판단
+                    return hasTitle || hasContent;
+                });
                 
                 if (duplicateQuestion) {
                     const cafeUrl = 'https://cafe.naver.com/ramrc';
@@ -1685,7 +1692,7 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         const endOfMonth = new Date(year, now.getMonth() + 1, 0);
         const currentMonth = ("0" + (now.getMonth() + 1)).slice(-2);
         const periodText = currentMonth + "월";
-        replies.push(getChatRankings(startOfMonth, endOfMonth, "이번달 순위 (" + periodText + ")", sender));
+        replies.push(await getChatRankings(startOfMonth, endOfMonth, "이번달 순위 (" + periodText + ")", sender, room));
         return replies;
     }
 
@@ -1696,7 +1703,7 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         const endOfWeek = new Date(startOfWeek);
         endOfWeek.setDate(startOfWeek.getDate() + 6);
         const periodText = formatDate(startOfWeek) + " ~ " + formatDate(endOfWeek);
-        replies.push(getChatRankings(startOfWeek, endOfWeek, "이번주 순위 (" + periodText + ")", sender));
+        replies.push(await getChatRankings(startOfWeek, endOfWeek, "이번주 순위 (" + periodText + ")", sender, room));
         return replies;
     }
 
@@ -1709,7 +1716,7 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         const startOfLastMonth = new Date(lastYear, lastMonthDate.getMonth(), 1);
         const endOfLastMonth = new Date(lastYear, lastMonthDate.getMonth() + 1, 0);
         const periodText = lastMonth + "월";
-        replies.push(getChatRankings(startOfLastMonth, endOfLastMonth, "저번달 순위 (" + periodText + ")", sender));
+        replies.push(await getChatRankings(startOfLastMonth, endOfLastMonth, "저번달 순위 (" + periodText + ")", sender, room));
         return replies;
     }
 
@@ -1721,7 +1728,7 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         const endOfLastWeek = new Date(startOfLastWeek);
         endOfLastWeek.setDate(startOfLastWeek.getDate() + 6);
         const periodText = formatDate(startOfLastWeek) + " ~ " + formatDate(endOfLastWeek);
-        replies.push(getChatRankings(startOfLastWeek, endOfLastWeek, "지난주 순위 (" + periodText + ")", sender));
+        replies.push(await getChatRankings(startOfLastWeek, endOfLastWeek, "지난주 순위 (" + periodText + ")", sender, room));
         return replies;
     }
 
@@ -1733,7 +1740,7 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         const startDate = new Date(year, month, day);
         const endDate = new Date(year, month, day);
         const periodText = formatDate(today);
-        replies.push(getChatRankings(startDate, endDate, "오늘 순위 (" + periodText + ")", sender));
+        replies.push(await getChatRankings(startDate, endDate, "오늘 순위 (" + periodText + ")", sender, room));
         return replies;
     }
 
@@ -1746,14 +1753,14 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         const startDate = new Date(year, month, day);
         const endDate = new Date(year, month, day);
         const periodText = formatDate(yesterday);
-        replies.push(getChatRankings(startDate, endDate, "어제 순위 (" + periodText + ")", sender));
+        replies.push(await getChatRankings(startDate, endDate, "어제 순위 (" + periodText + ")", sender, room));
         return replies;
     }
 
     if (msg === "/전체 채팅") {
         const startOfAllTime = new Date(2000, 0, 1);
         const endOfAllTime = new Date();
-        replies.push(getChatRankings(startOfAllTime, endOfAllTime, "전체 채팅 순위", sender));
+        replies.push(await getChatRankings(startOfAllTime, endOfAllTime, "전체 채팅 순위", sender, room));
         return replies;
     }
 
