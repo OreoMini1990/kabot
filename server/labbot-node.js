@@ -756,6 +756,9 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
     // 디버깅: 함수 호출 확인
     console.log(`[handleMessage] 호출됨: room="${room}", msg="${msg.substring(0, 50)}...", sender="${sender}", replyToMessageId=${replyToMessageId}`);
     
+    // 채팅 로거 모듈 로드 (함수 최상위에서 한 번만 선언)
+    const chatLogger = require('./db/chatLogger');
+    
     // ========== 신고 기능 처리 (답장 버튼 + @랩봇 멘션 + !신고) ==========
     const msgTrimmed = msg.trim();
     const hasMention = msgTrimmed.includes(`@${CONFIG.BOT_NAME}`) || msgTrimmed.includes('@랩봇');
@@ -776,7 +779,6 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
     // 답장 버튼 + 멘션 + !신고 형식 확인
     if (replyToMessageId && hasMention && hasReportCommand) {
         console.log('[신고] 신고 요청 감지:', { replyToMessageId, reporter: sender, message: msg });
-        const chatLogger = require('./db/chatLogger');
         
         // !신고 다음 내용 추출 (신고 사유)
         let reportReason = '신고 사유 없음';
@@ -919,7 +921,6 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
             }
             
             // ========== 연속 등록 제한 체크 (1시간 이내 같은 질문) ==========
-            const chatLogger = require('./db/chatLogger');
             const questionSenderName = extractSenderName(sender);
             const questionSenderId = sender.includes('/') ? sender.split('/')[1] : null;
             
@@ -956,9 +957,8 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
             // ========== 직전 메시지 이미지 확인 ==========
             let previousMessageImage = null;
             try {
-                const chatLoggerDb = require('./db/chatLogger');
                 // 최근 메시지 조회 (같은 사용자의 메시지)
-                const recentMessages = await chatLoggerDb.getChatMessagesByPeriod(
+                const recentMessages = await chatLogger.getChatMessagesByPeriod(
                     room,
                     new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5분 이내
                     new Date().toISOString(),
@@ -2058,8 +2058,6 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
     }
 
     // ========== 채팅 조회 기능 (관리자 전용) ==========
-    const chatLogger = require('./db/chatLogger');
-    
     // 전체 채팅
     if (msg === '/전체 채팅') {
         if (!isAdmin(sender)) {
