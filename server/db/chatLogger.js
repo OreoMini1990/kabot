@@ -26,13 +26,17 @@ async function getOrCreateUser(roomName, senderName, senderId) {
             // 이름이 변경되었는지 확인
             if (existingUser.display_name !== senderName) {
                 // 이름 변경 이력 저장
-                await db.supabase
+                const { error: historyError } = await db.supabase
                     .from('user_name_history')
                     .insert({
                         user_id: existingUser.id,
                         old_name: existingUser.display_name,
                         new_name: senderName
                     });
+                
+                if (historyError) {
+                    console.error('[채팅 로그] 이름 변경 이력 저장 실패:', historyError.message);
+                }
                 
                 // 사용자 정보 업데이트
                 await db.supabase
@@ -171,7 +175,7 @@ async function ensureRoomMembership(roomId, userId, role = 'member') {
 /**
  * 채팅 메시지 저장
  */
-async function saveChatMessage(roomName, senderName, senderId, messageText, isGroupChat = true, metadata = null) {
+async function saveChatMessage(roomName, senderName, senderId, messageText, isGroupChat = true, metadata = null, replyToMessageId = null, threadId = null) {
     try {
         // 정규화된 사용자 및 채팅방 조회/생성
         const user = await getOrCreateUser(roomName, senderName, senderId);
@@ -225,6 +229,8 @@ async function saveChatMessage(roomName, senderName, senderId, messageText, isGr
                 has_file: hasFile,
                 has_video: hasVideo,
                 has_location: hasLocation,
+                reply_to_message_id: replyToMessageId || null,
+                thread_id: threadId || null,
                 metadata: metadata || null
             })
             .select()
@@ -801,6 +807,108 @@ async function saveAttachment(messageId, attachmentType, attachmentUrl, attachme
     }
 }
 
+/**
+ * 닉네임 변경 감지 및 알림
+ */
+async function checkNicknameChange(roomName, senderName, senderId) {
+    try {
+        const user = await getOrCreateUser(roomName, senderName, senderId);
+        if (!user) {
+            return null;
+        }
+        
+        // 사용자의 이전 이름 조회
+        const { data: nameHistory } = await db.supabase
+            .from('user_name_history')
+            .select('*')
+            .eq('user_id', user.id)
+            .order('changed_at', { ascending: false })
+            .limit(1);
+        
+        // 이름 변경 이력이 있고, 마지막 이름과 현재 이름이 다르면 변경 감지
+        if (nameHistory && nameHistory.length > 0) {
+            const lastHistory = nameHistory[0];
+            if (lastHistory.new_name !== senderName) {
+                // 이름이 변경된 경우
+                // 이미 getOrCreateUser에서 이름 변경 이력이 저장되었을 것
+                // 전체 변경 이력 조회
+                const { data: allHistory } = await db.supabase
+                    .from('user_name_history')
+                    .select('*')
+                    .eq('user_id', user.id)
+                    .order('changed_at', { ascending: true });
+                
+                if (allHistory && allHistory.length > 0) {
+                    // 변경 이력 메시지 생성
+                    const historyLines = allHistory.map(h => {
+                        const date = new Date(h.changed_at).toISOString().split('T')[0];
+                        return `\t- ${date} : ${h.old_name} → ${h.new_name}`;
+                    });
+                    
+                    // 현재 이름도 추가
+                    const currentDate = new Date().toISOString().split('T')[0];
+                    const lastEntry = allHistory[allHistory.length - 1];
+                    if (lastEntry.new_name !== senderName) {
+                        historyLines.push(`\t- ${currentDate} : ${lastEntry.new_name} → ${senderName}`);
+                    }
+                    
+                    const notification = `🚨 닉네임 변경 감지!\n\n[닉네임 변경 이력]\n${historyLines.join('\n')}`;
+                    return notification;
+                }
+            }
+        }
+        
+        return null; // 변경 없음
+    } catch (error) {
+        console.error('[채팅 로그] 닉네임 변경 감지 중 오류:', error.message);
+        return null;
+    }
+}
+
+/**
+ * 신고 저장
+ */
+async function saveReport(reportedMessageId, reporterName, reporterId, reportReason, reportType = 'general') {
+    try {
+        // 신고자 사용자 조회/생성
+        const { data: message } = await db.supabase
+            .from('chat_messages')
+            .select('room_name')
+            .eq('id', reportedMessageId)
+            .single();
+        
+        if (!message) {
+            console.error('[채팅 로그] 신고 대상 메시지를 찾을 수 없음:', reportedMessageId);
+            return null;
+        }
+        
+        const reporterUser = await getOrCreateUser(message.room_name, reporterName, reporterId);
+        
+        const { data, error } = await db.supabase
+            .from('reports')
+            .insert({
+                reported_message_id: reportedMessageId,
+                reporter_user_id: reporterUser?.id || null,
+                reporter_name: reporterName,
+                report_reason: reportReason,
+                report_type: reportType,
+                status: 'pending'
+            })
+            .select()
+            .single();
+        
+        if (error) {
+            console.error('[채팅 로그] 신고 저장 실패:', error.message);
+            return null;
+        }
+        
+        return data;
+    } catch (error) {
+        console.error('[채팅 로그] 신고 저장 중 오류:', error.message);
+        return null;
+    }
+}
+
 module.exports = {
     getOrCreateUser,
     getOrCreateRoom,
@@ -811,6 +919,8 @@ module.exports = {
     saveMessageDeletion,
     saveMentions,
     saveAttachment,
+    checkNicknameChange,
+    saveReport,
     getChatMessagesByPeriod,
     getUserChatStatistics,
     getMostReactedUser,

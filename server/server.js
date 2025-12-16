@@ -1553,13 +1553,50 @@ wss.on('connection', function connection(ws, req) {
         // 채팅 메시지 저장 (비동기, 에러가 나도 계속 진행)
         const chatLogger = require('./db/chatLogger');
         const senderId = sender && sender.includes('/') ? sender.split('/')[1] : null;
+        
+        // 메시지 메타데이터 추출
+        const replyToMessageId = json?.reply_to_message_id || json?.reply_to || json?.parent_message_id || null;
+        const threadId = json?.thread_id || json?.thread_message_id || null;
+        const chatId = json?.chat_id || null;
+        
+        // 메타데이터 구성
+        const metadata = {
+          chat_id: chatId,
+          original_json: json ? {
+            userId: json.userId,
+            user_id: json.user_id,
+            myUserId: json.myUserId,
+            room_data: json.room_data ? 'present' : null
+          } : null
+        };
+        
         chatLogger.saveChatMessage(
           decryptedRoomName || '',
           senderName || sender || '',
           senderId,
           decryptedMessage || '',
-          isGroupChat !== undefined ? isGroupChat : true
-        ).catch(err => {
+          isGroupChat !== undefined ? isGroupChat : true,
+          metadata,
+          replyToMessageId,
+          threadId
+        ).then(savedMessage => {
+          // 닉네임 변경 감지 및 알림
+          if (savedMessage) {
+            chatLogger.checkNicknameChange(
+              decryptedRoomName || '',
+              senderName || sender || '',
+              senderId
+            ).then(notification => {
+              if (notification) {
+                // 닉네임 변경 알림을 replies에 추가
+                // handleMessage 호출 전이므로 별도로 처리 필요
+                console.log('[닉네임 변경] 알림:', notification);
+              }
+            }).catch(err => {
+              console.error('[닉네임 변경] 감지 실패:', err.message);
+            });
+          }
+        }).catch(err => {
           console.error('[채팅 로그] 저장 실패 (계속 진행):', err.message);
         });
         
@@ -1567,7 +1604,8 @@ wss.on('connection', function connection(ws, req) {
           decryptedRoomName || '',
           decryptedMessage || '',
           senderName || sender || '',  // 닉네임 우선, 없으면 원본 sender 사용
-          isGroupChat !== undefined ? isGroupChat : true
+          isGroupChat !== undefined ? isGroupChat : true,
+          replyToMessageId  // 답장 메시지 ID 전달
         );
         
         console.log(`[${new Date().toISOString()}] handleMessage 호출 후:`);
@@ -1577,6 +1615,13 @@ wss.on('connection', function connection(ws, req) {
         } else {
           console.log(`  ⚠⚠⚠ replies가 비어있습니다! ⚠⚠⚠`);
         }
+        
+        // 닉네임 변경 알림 추가 (있는 경우)
+        if (nicknameChangeNotification) {
+          replies.unshift(nicknameChangeNotification);
+          console.log('[닉네임 변경] 알림을 replies에 추가');
+        }
+        
         console.log(`[${new Date().toISOString()}] ═══════════════════════════════════════════════════════`);
         
         // chat_id 추출 (클라이언트에서 숫자로 변환 가능하도록)

@@ -747,11 +747,32 @@ function removeItem(itemName, replies) {
  * @param {boolean} isGroupChat - 그룹 채팅 여부
  * @returns {Promise<string[]>} 응답 메시지 배열
  */
-async function handleMessage(room, msg, sender, isGroupChat) {
+async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = null) {
     const replies = [];
     
     // 디버깅: 함수 호출 확인
-    console.log(`[handleMessage] 호출됨: room="${room}", msg="${msg.substring(0, 50)}...", sender="${sender}"`);
+    console.log(`[handleMessage] 호출됨: room="${room}", msg="${msg.substring(0, 50)}...", sender="${sender}", replyToMessageId=${replyToMessageId}`);
+    
+    // ========== 신고 기능 처리 (답장 버튼 + "신고" 키워드) ==========
+    if (replyToMessageId && (msg.trim() === '신고' || msg.trim().startsWith('신고 '))) {
+        console.log('[신고] 신고 요청 감지:', { replyToMessageId, reporter: sender, reason: msg });
+        const chatLogger = require('./db/chatLogger');
+        const reportReason = msg.trim().substring(2).trim() || '신고 사유 없음';
+        const reportResult = await chatLogger.saveReport(
+            replyToMessageId,
+            sender,
+            sender.includes('/') ? sender.split('/')[1] : null,
+            reportReason,
+            'general'
+        );
+        
+        if (reportResult) {
+            replies.push('✅ 신고가 접수되었습니다. 관리자가 검토 후 조치하겠습니다.');
+        } else {
+            replies.push('❌ 신고 접수에 실패했습니다. 다시 시도해주세요.');
+        }
+        return replies; // 신고 처리 후 종료
+    }
     
     // ========== 채팅방 필터링: "의운모" 채팅방만 반응 ==========
     // room 파라미터가 채팅방 이름 또는 ID일 수 있음
