@@ -81,40 +81,9 @@ DECRYPT_ENABLED = CRYPTO_AVAILABLE
 
 # ⚠️ 복호화 관련 상수 및 함수는 kakao_decrypt_module.py로 이동됨
 # 복호화 로직은 모듈에서 import하여 사용합니다.
-# 아래 코드는 레거시 호환성을 위해 주석 처리되었습니다.
-# 실제 사용은 kakao_decrypt_module.py의 함수들을 사용하세요.
-
-# (레거시 호환성: 채팅방 이름 복호화에서 사용하는 경우를 위해 일부 상수는 유지)
-# 하지만 실제 복호화 로직은 모듈에서 import하여 사용
-    """
-    Reimplementation of com.kakao.talk.dream.Projector.incept() from libdream.so
-    encType 31 (실제로는 830819)에 대한 특별한 처리
-    """
-    dict1 = ['adrp.ldrsh.ldnp', 'ldpsw', 'umax', 'stnp.rsubhn', 'sqdmlsl', 'uqrshl.csel', 'sqshlu', 'umin.usubl.umlsl', 'cbnz.adds', 'tbnz',
-             'usubl2', 'stxr', 'sbfx', 'strh', 'stxrb.adcs', 'stxrh', 'ands.urhadd', 'subs', 'sbcs', 'fnmadd.ldxrb.saddl',
-             'stur', 'ldrsb', 'strb', 'prfm', 'ubfiz', 'ldrsw.madd.msub.sturb.ldursb', 'ldrb', 'b.eq', 'ldur.sbfiz', 'extr',
-             'fmadd', 'uqadd', 'sshr.uzp1.sttrb', 'umlsl2', 'rsubhn2.ldrh.uqsub', 'uqshl', 'uabd', 'ursra', 'usubw', 'uaddl2',
-             'b.gt', 'b.lt', 'sqshl', 'bics', 'smin.ubfx', 'smlsl2', 'uabdl2', 'zip2.ssubw2', 'ccmp', 'sqdmlal',
-             'b.al', 'smax.ldurh.uhsub', 'fcvtxn2', 'b.pl']
-    dict2 = ['saddl', 'urhadd', 'ubfiz.sqdmlsl.tbnz.stnp', 'smin', 'strh', 'ccmp', 'usubl', 'umlsl', 'uzp1', 'sbfx',
-             'b.eq', 'zip2.prfm.strb', 'msub', 'b.pl', 'csel', 'stxrh.ldxrb', 'uqrshl.ldrh', 'cbnz', 'ursra', 'sshr.ubfx.ldur.ldnp',
-             'fcvtxn2', 'usubl2', 'uaddl2', 'b.al', 'ssubw2', 'umax', 'b.lt', 'adrp.sturb', 'extr', 'uqshl',
-             'smax', 'uqsub.sqshlu', 'ands', 'madd', 'umin', 'b.gt', 'uabdl2', 'ldrsb.ldpsw.rsubhn', 'uqadd', 'sttrb',
-             'stxr', 'adds', 'rsubhn2.umlsl2', 'sbcs.fmadd', 'usubw', 'sqshl', 'stur.ldrsh.smlsl2', 'ldrsw', 'fnmadd', 'stxrb.sbfiz',
-             'adcs', 'bics.ldrb', 'l1ursb', 'subs.uhsub', 'ldurh', 'uabd', 'sqdmlal']
-    word1 = dict1[n % len(dict1)]
-    word2 = dict2[(n+31) % len(dict2)]
-    return word1 + '.' + word2
-
-# PREFIXES: kakaodecrypt.py와 동일하게 구성 (테스트된 버전 사용)
-# 인덱스 30: incept(830819) = 'extr.ursra'
-# 인덱스 31: 'veil'
-KAKAO_PREFIXES = [
-    "", "", "12", "24", "18", "30", "36", "12", "48", "7", "35", "40",
-    "17", "23", "29", "isabel", "kale", "sulli", "van", "merry", "kyle",
-    "james", "maddux", "tony", "hayden", "paul", "elijah", "dorothy",
-    "sally", "bran", incept(830819), "veil"
-]
+# 
+# ⚠️ 경고: 복호화 로직은 절대 수정하지 마세요!
+# 모든 복호화 관련 코드는 kakao_decrypt_module.py에 있으며, 이 파일은 절대 수정하면 안 됩니다.
 
 def load_last_message_id():
     """마지막 메시지 ID 로드"""
