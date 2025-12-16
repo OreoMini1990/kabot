@@ -1123,6 +1123,52 @@ wss.on('connection', function connection(ws, req) {
         return; // ACK는 처리하지 않고 무시
       }
       
+      // 반응(reaction) 메시지 처리
+      if (messageData.type === 'reaction' || messageData.type === 'like') {
+        const { room, sender, json } = messageData;
+        const chatLogger = require('./db/chatLogger');
+        
+        try {
+          // 반응 정보 추출
+          const targetMessageId = json?.target_message_id || json?.message_id || json?.chat_id || null;
+          const reactionType = json?.reaction_type || json?.reaction || 'thumbs_up';
+          const reactorName = sender && sender.includes('/') ? sender.split('/')[0] : sender || '';
+          const reactorId = sender && sender.includes('/') ? sender.split('/')[1] : null;
+          
+          // 관리자 반응 여부 확인
+          const { CONFIG } = require('./labbot-node');
+          const isAdminReaction = CONFIG.ADMIN_USERS.some(admin => {
+            const adminName = admin.includes('/') ? admin.split('/')[0] : admin;
+            return adminName === reactorName;
+          });
+          
+          if (targetMessageId && reactorName) {
+            await chatLogger.saveReaction(
+              targetMessageId,
+              reactionType,
+              reactorName,
+              reactorId,
+              isAdminReaction
+            );
+            console.log('[반응 저장] 성공:', {
+              message_id: targetMessageId,
+              reaction_type: reactionType,
+              reactor: reactorName,
+              is_admin: isAdminReaction
+            });
+          } else {
+            console.warn('[반응 저장] 실패: targetMessageId 또는 reactorName 없음', {
+              targetMessageId,
+              reactorName
+            });
+          }
+        } catch (err) {
+          console.error('[반응 저장] 오류:', err.message);
+        }
+        
+        return; // 반응 메시지는 추가 처리 불필요
+      }
+      
       // Bridge APK 식별 메시지 처리
       if (messageData.type === 'bridge_connect') {
         console.log(`[${new Date().toISOString()}] ═══════════════════════════════════════════════════════`);
