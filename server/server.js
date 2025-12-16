@@ -1550,6 +1550,19 @@ wss.on('connection', function connection(ws, req) {
         console.log(`  sender: "${senderName || sender || ''}"`);
         console.log(`  isGroupChat: ${isGroupChat !== undefined ? isGroupChat : true}`);
         
+        // 채팅 메시지 저장 (비동기, 에러가 나도 계속 진행)
+        const chatLogger = require('./db/chatLogger');
+        const senderId = sender && sender.includes('/') ? sender.split('/')[1] : null;
+        chatLogger.saveChatMessage(
+          decryptedRoomName || '',
+          senderName || sender || '',
+          senderId,
+          decryptedMessage || '',
+          isGroupChat !== undefined ? isGroupChat : true
+        ).catch(err => {
+          console.error('[채팅 로그] 저장 실패 (계속 진행):', err.message);
+        });
+        
         const replies = await handleMessage(
           decryptedRoomName || '',
           decryptedMessage || '',

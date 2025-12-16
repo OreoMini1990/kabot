@@ -1718,15 +1718,25 @@ async function handleMessage(room, msg, sender, isGroupChat) {
 
     // 사용법
     if (msg === '/사용법') {
+        // 관리자 전용 기능
+        if (!isAdmin(sender)) {
+            replies.push("❌ 권한이 없습니다. 관리자 전용 기능입니다.");
+            return replies;
+        }
+        
         let usageGuide = "\n─────────────\n" +
-            "💬 톡순위 [특정기간 사용자별 톡 수를 알려줘요]\n" +
+            "💬 채팅 조회 [특정기간 채팅 내역을 조회해요]\n" +
             "/전체 채팅\n" +
             "/이번달 채팅\n" +
             "/이번주 채팅\n" +
             "/저번달 채팅\n" +
             "/저번주 채팅\n" +
             "/오늘 채팅\n" +
-            "/어제 채팅\n\n";
+            "/어제 채팅\n\n" +
+            "📊 통계 [채팅 통계를 확인해요]\n" +
+            "/통계\n" +
+            "/이번주 통계\n" +
+            "/이번달 통계\n\n";
         
         if (CONFIG.FEATURES.POINT_SYSTEM) {
             usageGuide += "🏆 랭킹 [사용자별 포인트 현황을 알 수 있어요]\n" +
@@ -1883,6 +1893,340 @@ async function handleMessage(room, msg, sender, isGroupChat) {
         return replies;
     }
 
+    // ========== 채팅 조회 기능 (관리자 전용) ==========
+    const chatLogger = require('./db/chatLogger');
+    
+    // 전체 채팅
+    if (msg === '/전체 채팅') {
+        if (!isAdmin(sender)) {
+            replies.push("❌ 권한이 없습니다. 관리자 전용 기능입니다.");
+            return replies;
+        }
+        
+        try {
+            const messages = await chatLogger.getChatMessagesByPeriod(room, '1970-01-01', new Date().toISOString(), 1000);
+            if (messages.length === 0) {
+                replies.push("📭 저장된 채팅이 없습니다.");
+                return replies;
+            }
+            
+            let result = `📜 전체 채팅 (최근 ${messages.length}개)\n──────────\n`;
+            messages.slice(-50).forEach(msg => {
+                const time = new Date(msg.created_at).toLocaleString('ko-KR');
+                result += `[${time}] ${msg.sender_name}: ${msg.message_text.substring(0, 100)}${msg.message_text.length > 100 ? '...' : ''}\n`;
+            });
+            replies.push(result);
+        } catch (error) {
+            replies.push(`❌ 채팅 조회 중 오류: ${error.message}`);
+        }
+        return replies;
+    }
+    
+    // 오늘 채팅
+    if (msg === '/오늘 채팅') {
+        if (!isAdmin(sender)) {
+            replies.push("❌ 권한이 없습니다. 관리자 전용 기능입니다.");
+            return replies;
+        }
+        
+        try {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const tomorrow = new Date(today);
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            
+            const messages = await chatLogger.getChatMessagesByPeriod(room, today.toISOString(), tomorrow.toISOString(), 1000);
+            if (messages.length === 0) {
+                replies.push("📭 오늘 저장된 채팅이 없습니다.");
+                return replies;
+            }
+            
+            let result = `📅 오늘 채팅 (${messages.length}개)\n──────────\n`;
+            messages.forEach(msg => {
+                const time = new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+                result += `[${time}] ${msg.sender_name}: ${msg.message_text.substring(0, 80)}${msg.message_text.length > 80 ? '...' : ''}\n`;
+            });
+            replies.push(result);
+        } catch (error) {
+            replies.push(`❌ 채팅 조회 중 오류: ${error.message}`);
+        }
+        return replies;
+    }
+    
+    // 어제 채팅
+    if (msg === '/어제 채팅') {
+        if (!isAdmin(sender)) {
+            replies.push("❌ 권한이 없습니다. 관리자 전용 기능입니다.");
+            return replies;
+        }
+        
+        try {
+            const yesterday = new Date();
+            yesterday.setDate(yesterday.getDate() - 1);
+            yesterday.setHours(0, 0, 0, 0);
+            const today = new Date(yesterday);
+            today.setDate(today.getDate() + 1);
+            
+            const messages = await chatLogger.getChatMessagesByPeriod(room, yesterday.toISOString(), today.toISOString(), 1000);
+            if (messages.length === 0) {
+                replies.push("📭 어제 저장된 채팅이 없습니다.");
+                return replies;
+            }
+            
+            let result = `📅 어제 채팅 (${messages.length}개)\n──────────\n`;
+            messages.forEach(msg => {
+                const time = new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+                result += `[${time}] ${msg.sender_name}: ${msg.message_text.substring(0, 80)}${msg.message_text.length > 80 ? '...' : ''}\n`;
+            });
+            replies.push(result);
+        } catch (error) {
+            replies.push(`❌ 채팅 조회 중 오류: ${error.message}`);
+        }
+        return replies;
+    }
+    
+    // 이번주 채팅
+    if (msg === '/이번주 채팅') {
+        if (!isAdmin(sender)) {
+            replies.push("❌ 권한이 없습니다. 관리자 전용 기능입니다.");
+            return replies;
+        }
+        
+        try {
+            const today = new Date();
+            const firstDayOfWeek = new Date(today);
+            firstDayOfWeek.setDate(today.getDate() - today.getDay() + 1);
+            firstDayOfWeek.setHours(0, 0, 0, 0);
+            
+            const messages = await chatLogger.getChatMessagesByPeriod(room, firstDayOfWeek.toISOString(), new Date().toISOString(), 1000);
+            if (messages.length === 0) {
+                replies.push("📭 이번주 저장된 채팅이 없습니다.");
+                return replies;
+            }
+            
+            let result = `📅 이번주 채팅 (${messages.length}개)\n──────────\n`;
+            messages.slice(-50).forEach(msg => {
+                const time = new Date(msg.created_at).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                result += `[${time}] ${msg.sender_name}: ${msg.message_text.substring(0, 60)}${msg.message_text.length > 60 ? '...' : ''}\n`;
+            });
+            replies.push(result);
+        } catch (error) {
+            replies.push(`❌ 채팅 조회 중 오류: ${error.message}`);
+        }
+        return replies;
+    }
+    
+    // 이번달 채팅
+    if (msg === '/이번달 채팅') {
+        if (!isAdmin(sender)) {
+            replies.push("❌ 권한이 없습니다. 관리자 전용 기능입니다.");
+            return replies;
+        }
+        
+        try {
+            const today = new Date();
+            const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+            firstDayOfMonth.setHours(0, 0, 0, 0);
+            
+            const messages = await chatLogger.getChatMessagesByPeriod(room, firstDayOfMonth.toISOString(), new Date().toISOString(), 1000);
+            if (messages.length === 0) {
+                replies.push("📭 이번달 저장된 채팅이 없습니다.");
+                return replies;
+            }
+            
+            let result = `📅 이번달 채팅 (${messages.length}개)\n──────────\n`;
+            messages.slice(-50).forEach(msg => {
+                const time = new Date(msg.created_at).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                result += `[${time}] ${msg.sender_name}: ${msg.message_text.substring(0, 60)}${msg.message_text.length > 60 ? '...' : ''}\n`;
+            });
+            replies.push(result);
+        } catch (error) {
+            replies.push(`❌ 채팅 조회 중 오류: ${error.message}`);
+        }
+        return replies;
+    }
+    
+    // 저번주 채팅
+    if (msg === '/저번주 채팅') {
+        if (!isAdmin(sender)) {
+            replies.push("❌ 권한이 없습니다. 관리자 전용 기능입니다.");
+            return replies;
+        }
+        
+        try {
+            const today = new Date();
+            const firstDayOfThisWeek = new Date(today);
+            firstDayOfThisWeek.setDate(today.getDate() - today.getDay() + 1);
+            firstDayOfThisWeek.setHours(0, 0, 0, 0);
+            
+            const firstDayOfLastWeek = new Date(firstDayOfThisWeek);
+            firstDayOfLastWeek.setDate(firstDayOfLastWeek.getDate() - 7);
+            
+            const messages = await chatLogger.getChatMessagesByPeriod(room, firstDayOfLastWeek.toISOString(), firstDayOfThisWeek.toISOString(), 1000);
+            if (messages.length === 0) {
+                replies.push("📭 저번주 저장된 채팅이 없습니다.");
+                return replies;
+            }
+            
+            let result = `📅 저번주 채팅 (${messages.length}개)\n──────────\n`;
+            messages.slice(-50).forEach(msg => {
+                const time = new Date(msg.created_at).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                result += `[${time}] ${msg.sender_name}: ${msg.message_text.substring(0, 60)}${msg.message_text.length > 60 ? '...' : ''}\n`;
+            });
+            replies.push(result);
+        } catch (error) {
+            replies.push(`❌ 채팅 조회 중 오류: ${error.message}`);
+        }
+        return replies;
+    }
+    
+    // 저번달 채팅
+    if (msg === '/저번달 채팅') {
+        if (!isAdmin(sender)) {
+            replies.push("❌ 권한이 없습니다. 관리자 전용 기능입니다.");
+            return replies;
+        }
+        
+        try {
+            const today = new Date();
+            const firstDayOfThisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+            const firstDayOfLastMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+            const lastDayOfLastMonth = new Date(today.getFullYear(), today.getMonth(), 0);
+            lastDayOfLastMonth.setHours(23, 59, 59, 999);
+            
+            const messages = await chatLogger.getChatMessagesByPeriod(room, firstDayOfLastMonth.toISOString(), lastDayOfLastMonth.toISOString(), 1000);
+            if (messages.length === 0) {
+                replies.push("📭 저번달 저장된 채팅이 없습니다.");
+                return replies;
+            }
+            
+            let result = `📅 저번달 채팅 (${messages.length}개)\n──────────\n`;
+            messages.slice(-50).forEach(msg => {
+                const time = new Date(msg.created_at).toLocaleString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+                result += `[${time}] ${msg.sender_name}: ${msg.message_text.substring(0, 60)}${msg.message_text.length > 60 ? '...' : ''}\n`;
+            });
+            replies.push(result);
+        } catch (error) {
+            replies.push(`❌ 채팅 조회 중 오류: ${error.message}`);
+        }
+        return replies;
+    }
+    
+    // 통계 기능
+    if (msg === '/통계' || msg === '/이번주 통계') {
+        if (!isAdmin(sender)) {
+            replies.push("❌ 권한이 없습니다. 관리자 전용 기능입니다.");
+            return replies;
+        }
+        
+        try {
+            const today = new Date();
+            const firstDayOfWeek = new Date(today);
+            firstDayOfWeek.setDate(today.getDate() - today.getDay() + 1);
+            firstDayOfWeek.setHours(0, 0, 0, 0);
+            
+            const stats = await chatLogger.getUserChatStatistics(room, firstDayOfWeek.toISOString().split('T')[0], today.toISOString().split('T')[0]);
+            const mostReacted = await chatLogger.getMostReactedUser(room, firstDayOfWeek.toISOString(), today.toISOString());
+            
+            if (stats.length === 0) {
+                replies.push("📊 이번주 통계 데이터가 없습니다.");
+                return replies;
+            }
+            
+            // TOP 3 사용자
+            const top3 = stats.slice(0, 3);
+            let result = "🗣 이번 주 말 많은 TOP 3\n──────────\n";
+            top3.forEach((user, index) => {
+                result += `${index + 1}위: ${user.user_name}님 (${user.message_count}회)\n`;
+            });
+            
+            // 가장 반응 많이 받은 사용자
+            if (mostReacted) {
+                result += `\n⭐ 가장 반응 많이 받은 유저\n──────────\n`;
+                result += `1위: ${mostReacted.user_name}님 (${mostReacted.reaction_count}회)\n`;
+            }
+            
+            // 관찰자 비율 계산
+            const totalMessages = stats.reduce((sum, s) => sum + s.message_count, 0);
+            const activeUsers = stats.filter(s => s.message_count > 0).length;
+            const observerCount = stats.length - activeUsers;
+            const observerRate = stats.length > 0 ? Math.round((observerCount / stats.length) * 100) : 0;
+            result += `\n👀 읽기만 하는 관찰자 비율: ${observerRate}%\n`;
+            
+            // 가장 활발한 시간대
+            const hourlyCounts = {};
+            stats.forEach(user => {
+                if (user.hourly_message_count) {
+                    Object.entries(user.hourly_message_count).forEach(([hour, count]) => {
+                        hourlyCounts[hour] = (hourlyCounts[hour] || 0) + count;
+                    });
+                }
+            });
+            
+            let maxHour = 0;
+            let maxCount = 0;
+            Object.entries(hourlyCounts).forEach(([hour, count]) => {
+                if (count > maxCount) {
+                    maxCount = count;
+                    maxHour = parseInt(hour);
+                }
+            });
+            
+            if (maxHour >= 0) {
+                const nextHour = (maxHour + 1) % 24;
+                result += `\n🔥 이번 주 가장 활발했던 시간대: ${maxHour}–${nextHour}시\n`;
+            }
+            
+            // 주제별 통계 (향후 확장용 - 현재는 기본 메시지만 표시)
+            result += `\n🧩 주제별 재미 통계\n──────────\n`;
+            result += `(주제 분석 기능은 향후 추가 예정)\n`;
+            
+            replies.push(result);
+        } catch (error) {
+            replies.push(`❌ 통계 조회 중 오류: ${error.message}`);
+        }
+        return replies;
+    }
+    
+    // 이번달 통계
+    if (msg === '/이번달 통계') {
+        if (!isAdmin(sender)) {
+            replies.push("❌ 권한이 없습니다. 관리자 전용 기능입니다.");
+            return replies;
+        }
+        
+        try {
+            const today = new Date();
+            const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+            
+            const stats = await chatLogger.getUserChatStatistics(room, firstDayOfMonth.toISOString().split('T')[0], today.toISOString().split('T')[0]);
+            const mostReacted = await chatLogger.getMostReactedUser(room, firstDayOfMonth.toISOString(), today.toISOString());
+            
+            if (stats.length === 0) {
+                replies.push("📊 이번달 통계 데이터가 없습니다.");
+                return replies;
+            }
+            
+            // TOP 3 사용자
+            const top3 = stats.slice(0, 3);
+            let result = "🗣 이번 달 말 많은 TOP 3\n──────────\n";
+            top3.forEach((user, index) => {
+                result += `${index + 1}위: ${user.user_name}님 (${user.message_count}회)\n`;
+            });
+            
+            // 가장 반응 많이 받은 사용자
+            if (mostReacted) {
+                result += `\n⭐ 가장 반응 많이 받은 유저\n──────────\n`;
+                result += `1위: ${mostReacted.user_name}님 (${mostReacted.reaction_count}회)\n`;
+            }
+            
+            replies.push(result);
+        } catch (error) {
+            replies.push(`❌ 통계 조회 중 오류: ${error.message}`);
+        }
+        return replies;
+    }
+    
     // 함수 끝에서 replies 상태 확인
     console.log(`[handleMessage] 함수 종료: replies.length=${replies.length}`);
     if (replies.length > 0) {
