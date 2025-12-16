@@ -1208,7 +1208,39 @@ def send_to_server(message_data, is_reaction=False):
             # Iris 원본 코드: getChatInfo에서 getNameOfUserId 호출
             sender_name = get_name_of_user_id(user_id)
             if sender_name:
-                print(f"[발신자] 이름 조회 성공: user_id={user_id}, 이름=\"{sender_name}\"")
+                # get_name_of_user_id가 반환한 이름이 여전히 암호화되어 있는지 확인
+                is_encrypted_name = (isinstance(sender_name, str) and 
+                                   len(sender_name) > 10 and 
+                                   len(sender_name) % 4 == 0 and
+                                   all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in sender_name))
+                
+                # 암호화되어 있으면 추가 복호화 시도
+                if is_encrypted_name and KAKAODECRYPT_AVAILABLE and MY_USER_ID:
+                    print(f"[발신자] 이름이 여전히 암호화되어 있음, 추가 복호화 시도: user_id={user_id}")
+                    enc_candidates = [31, 30, 32]
+                    for enc_try in enc_candidates:
+                        try:
+                            decrypt_user_id_int = int(MY_USER_ID)
+                            if decrypt_user_id_int > 0:
+                                decrypted = KakaoDecrypt.decrypt(decrypt_user_id_int, enc_try, sender_name)
+                                if decrypted and decrypted != sender_name:
+                                    has_control_chars = any(ord(c) < 32 and c not in '\n\r\t' for c in decrypted)
+                                    if not has_control_chars:
+                                        sender_name = decrypted
+                                        print(f"[✓] 발신자 이름 복호화 성공: user_id={user_id}, enc={enc_try}, 이름=\"{sender_name}\"")
+                                        break
+                        except:
+                            continue
+                    
+                    # 복호화 실패한 경우 경고
+                    if is_encrypted_name and (isinstance(sender_name, str) and 
+                                             len(sender_name) > 10 and 
+                                             len(sender_name) % 4 == 0 and
+                                             all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in sender_name)):
+                        print(f"[경고] 발신자 이름 복호화 실패: user_id={user_id}, 암호화된 이름 그대로 사용")
+                
+                if sender_name:
+                    print(f"[발신자] 이름 조회 성공: user_id={user_id}, 이름=\"{sender_name}\"")
             else:
                 print(f"[발신자] 이름 조회 실패: user_id={user_id}, user_id만 사용")
         
