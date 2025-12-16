@@ -1208,7 +1208,7 @@ def send_to_server(message_data, is_reaction=False):
             # Iris 원본 코드: getChatInfo에서 getNameOfUserId 호출
             sender_name = get_name_of_user_id(user_id)
             if sender_name:
-                    print(f"[발신자] 이름 조회 성공: user_id={user_id}, 이름=\"{sender_name}\"")
+                print(f"[발신자] 이름 조회 성공: user_id={user_id}, 이름=\"{sender_name}\"")
             else:
                 print(f"[발신자] 이름 조회 실패: user_id={user_id}, user_id만 사용")
         
