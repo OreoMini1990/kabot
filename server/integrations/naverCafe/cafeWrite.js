@@ -87,11 +87,12 @@ async function writeCafeArticle({ subject, content, clubid, menuid, accessToken,
         
         // 3단계: Python 예시처럼 직접 문자열 조합 (이미 인코딩된 값은 querystring.stringify 사용하지 않음)
         // Python: data = "subject=" + subject + "&content=" + content
-        // headid 파라미터 추가 (말머리 ID)
+        // headid 파라미터 추가 (말머리 ID - 문자열로 전달)
         let formData = `subject=${ms949Subject}&content=${ms949Content}`;
-        if (headid !== null && headid !== undefined && !isNaN(headid)) {
-            formData += `&headid=${headid}`;
-            console.log(`[네이버 카페] 말머리(headid) 포함: ${headid}`);
+        if (headid !== null && headid !== undefined && headid !== '') {
+            // 문자열로 전달 (예: "단톡방질문")
+            formData += `&headid=${encodeURIComponent(String(headid))}`;
+            console.log(`[네이버 카페] 말머리(headid) 포함: "${headid}" (문자열)`);
         } else {
             console.log(`[네이버 카페] 말머리(headid) 없음 - headid=${headid}, 환경변수 NAVER_CAFE_HEADID 확인 필요`);
         }

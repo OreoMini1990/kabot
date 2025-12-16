@@ -465,7 +465,14 @@ function extractSenderName(sender) {
 
 // 권한 체크
 function isAdmin(sender) {
-    return CONFIG.ADMIN_USERS.includes(sender);
+    // sender에서 닉네임만 추출 (예: "랩장/AN/서울" -> "랩장")
+    const senderName = extractSenderName(sender);
+    
+    // ADMIN_USERS에서 닉네임만 추출하여 비교
+    return CONFIG.ADMIN_USERS.some(admin => {
+        const adminName = extractSenderName(admin);
+        return adminName === senderName;
+    });
 }
 
 // 파일 읽기 (에러 처리 포함)
@@ -758,8 +765,10 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
     
     // ========== 신고 기능 처리 (답장 버튼 + @랩봇 멘션 + !신고) ==========
     const msgTrimmed = msg.trim();
+    const msgLower = msgTrimmed.toLowerCase();
     const hasMention = msgTrimmed.includes(`@${CONFIG.BOT_NAME}`) || msgTrimmed.includes('@랩봇');
-    const hasReportCommand = msgTrimmed.includes('!신고') || msgTrimmed.startsWith('!신고');
+    // !신고 또는 ! 신고 (공백 포함) 모두 처리
+    const hasReportCommand = /![\s]*신고/.test(msgTrimmed) || msgLower.includes('!신고');
     const hasReportKeyword = msgTrimmed === '신고' || msgTrimmed.startsWith('신고 ');
     
     // 답장 버튼을 눌렀지만 멘션 없이 "신고"만 입력한 경우
@@ -773,25 +782,63 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         return replies;
     }
     
-    // 답장 버튼 + 멘션 + !신고 형식 확인
-    if (replyToMessageId && hasMention && hasReportCommand) {
+    // 답장 버튼 + 멘션 + !신고 형식 확인 (replyToMessageId가 없어도 멘션 + !신고면 처리)
+    if (hasMention && hasReportCommand) {
         console.log('[신고] 신고 요청 감지:', { replyToMessageId, reporter: sender, message: msg });
         
         // !신고 다음 내용 추출 (신고 사유)
         let reportReason = '신고 사유 없음';
         if (hasReportCommand) {
-            const reportIndex = msgTrimmed.indexOf('!신고');
-            const afterReport = msgTrimmed.substring(reportIndex + 3).trim();
-            // 멘션 제거 (@랩봇 등)
-            const cleanedReason = afterReport.replace(/@\w+/g, '').trim();
-            if (cleanedReason) {
-                reportReason = cleanedReason;
+            // !신고 또는 ! 신고 패턴 찾기
+            const reportMatch = msgTrimmed.match(/![\s]*신고[\s]*(.*)/i);
+            if (reportMatch && reportMatch[1]) {
+                const afterReport = reportMatch[1].trim();
+                // 멘션 제거 (@랩봇 등)
+                const cleanedReason = afterReport.replace(/@\w+/g, '').trim();
+                if (cleanedReason) {
+                    reportReason = cleanedReason;
+                }
             }
+        }
+        
+        // replyToMessageId가 없으면 최근 메시지 중 신고 가능한 메시지 찾기
+        let targetMessageId = replyToMessageId;
+        if (!targetMessageId) {
+            try {
+                // 최근 10개 메시지 중 같은 채팅방의 메시지 찾기
+                const recentMessages = await chatLogger.getChatMessagesByPeriod(
+                    room,
+                    new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5분 이내
+                    new Date().toISOString(),
+                    10
+                );
+                
+                // 가장 최근 메시지 사용 (답장 버튼을 누르지 않았을 경우)
+                if (recentMessages && recentMessages.length > 0) {
+                    // 현재 사용자가 아닌 다른 사용자의 메시지 찾기
+                    const otherUserMessage = recentMessages.find(m => m.sender_name !== extractSenderName(sender));
+                    if (otherUserMessage) {
+                        targetMessageId = otherUserMessage.id;
+                        console.log('[신고] replyToMessageId 없음, 최근 메시지 사용:', targetMessageId);
+                    }
+                }
+            } catch (error) {
+                console.error('[신고] 최근 메시지 조회 실패:', error.message);
+            }
+        }
+        
+        if (!targetMessageId) {
+            const helpMessage = `📋 신고 방법 안내\n\n` +
+                `신고하려는 메시지에 답장 버튼을 누르고\n` +
+                `@${CONFIG.BOT_NAME} !신고 [사유] 를 입력하세요\n\n` +
+                `예시: @${CONFIG.BOT_NAME} !신고 부적절한 내용입니다`;
+            replies.push(helpMessage);
+            return replies;
         }
         
         // 신고 처리
         console.log('[신고] 신고 요청 처리 시작:', {
-            replyToMessageId,
+            replyToMessageId: targetMessageId,
             reporter: sender,
             reporterId: sender.includes('/') ? sender.split('/')[1] : null,
             reportReason
@@ -799,7 +846,7 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         
         try {
             const reportResult = await chatLogger.saveReport(
-                replyToMessageId,
+                targetMessageId,
                 sender,
                 sender.includes('/') ? sender.split('/')[1] : null,
                 reportReason,
@@ -902,9 +949,8 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
     }
 
     // ========== 명령어 체크 ==========
-    const trimmedMsg = msg.trim();
-    const msgLower = trimmedMsg.toLowerCase();
-    console.log(`[handleMessage] 명령어 체크: trimmedMsg="${trimmedMsg}", msgLower="${msgLower}"`);
+    // msgTrimmed와 msgLower는 이미 위에서 선언됨
+    console.log(`[handleMessage] 명령어 체크: trimmedMsg="${msgTrimmed}", msgLower="${msgLower}"`);
     console.log(`[handleMessage] !이미지 체크: startsWith("!이미지")=${msgLower.startsWith("!이미지")}, startsWith("!image")=${msgLower.startsWith("!image")}`);
     
     // ========== 네이버 카페 질문 기능 (우선순위 높음) ==========
@@ -989,21 +1035,29 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
                 // 체크 실패해도 질문 작성은 계속 진행
             }
             
-            // ========== 직전 메시지 이미지 확인 ==========
+            // ========== 직전 메시지 이미지 확인 (2분 이내, 같은 user_id) ==========
             let previousMessageImage = null;
             try {
-                // 최근 메시지 조회 (같은 사용자의 메시지)
+                // 최근 메시지 조회 (2분 이내)
                 const recentMessages = await chatLogger.getChatMessagesByPeriod(
                     room,
-                    new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5분 이내
+                    new Date(Date.now() - 2 * 60 * 1000).toISOString(), // 2분 이내
                     new Date().toISOString(),
                     10
                 );
                 
-                // 같은 사용자의 가장 최근 메시지 중 이미지가 있는 것 찾기
+                // 같은 사용자의 가장 최근 메시지 중 이미지가 있는 것 찾기 (user_id로 비교)
                 if (recentMessages && recentMessages.length > 0) {
                     for (const msg of recentMessages) {
-                        if (msg.sender_name === questionSenderName && msg.has_image) {
+                        // user_id로 비교 (더 정확함)
+                        const msgUserId = msg.user_id || (msg.sender_id ? msg.sender_id : null);
+                        const questionUserId = questionSenderId || null;
+                        
+                        // user_id가 있으면 user_id로 비교, 없으면 sender_name으로 비교
+                        const isSameUser = (msgUserId && questionUserId && msgUserId === questionUserId) ||
+                                          (!msgUserId && !questionUserId && msg.sender_name === questionSenderName);
+                        
+                        if (isSameUser && msg.has_image) {
                             // message_attachments 테이블에서 이미지 URL 조회
                             const db = require('./db/database');
                             const { data: attachments } = await db.supabase
@@ -1016,7 +1070,7 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
                             
                             if (attachments && attachments.attachment_url) {
                                 previousMessageImage = attachments.attachment_url;
-                                console.log('[네이버 카페] 직전 메시지 이미지 발견:', previousMessageImage);
+                                console.log('[네이버 카페] 직전 메시지 이미지 발견 (2분 이내, user_id 일치):', previousMessageImage);
                                 break;
                             }
                         }
@@ -1079,7 +1133,8 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
             
             const clubid = parseInt(clubidStr, 10);
             const menuid = parseInt(menuidStr, 10);
-            const headid = headidStr ? parseInt(headidStr, 10) : null; // 말머리 ID (선택사항)
+            // headid는 문자열로 전달 ("단톡방질문")
+            const headid = headidStr || "단톡방질문"; // 기본값: "단톡방질문"
             
             if (isNaN(clubid) || isNaN(menuid)) {
                 console.error(`[네이버 카페] clubid 또는 menuid가 유효한 숫자가 아닙니다. clubid=${clubidStr}(${clubid}), menuid=${menuidStr}(${menuid})`);
@@ -1087,9 +1142,7 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
                 return replies;
             }
             
-            if (headidStr && isNaN(headid)) {
-                console.warn(`[네이버 카페] headid가 유효한 숫자가 아닙니다. headid=${headidStr}, 말머리 없이 진행합니다.`);
-            }
+            console.log(`[네이버 카페] headid 설정: "${headid}" (문자열로 전달)`);
             
             // 네이버 카페 질문 서비스 호출
             const { submitQuestion, saveQuestionWithoutPermission } = require('./integrations/naverCafe/questionService');
