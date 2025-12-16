@@ -1705,15 +1705,20 @@ def poll_messages():
                             tried_user_ids = []
                             
                             # 시도할 user_id 후보 목록 (우선순위 순서)
+                            # 중요: Iris 코드 기준으로 발신자의 user_id를 사용해야 함
+                            # ObserverHelper.kt: val userId = cursor.getLong(columnNames.indexOf("user_id"))
+                            # KakaoDecrypt.decrypt(enc, message, userId) - 발신자의 user_id 사용
                             candidate_user_ids = []
                             decrypt_user_id = kakao_user_id if kakao_user_id else user_id
                             if decrypt_user_id:
                                 candidate_user_ids.append(('발신자 user_id (DB)', decrypt_user_id))
                             if MY_USER_ID and MY_USER_ID != decrypt_user_id:
-                                candidate_user_ids.append(('MY_USER_ID', MY_USER_ID))
+                                candidate_user_ids.append(('MY_USER_ID (fallback)', MY_USER_ID))
                             
-                            print(f"[디버그] 복호화 시도할 user_id 후보: {candidate_user_ids}, enc 후보: {enc_candidates}")
+                            print(f"[복호화] 시도할 user_id 후보: {candidate_user_ids}, enc 후보: {enc_candidates}")
+                            print(f"[복호화] 메시지 길이: {len(message)}, base64 패턴: {is_base64_like}")
                             
+                            decryption_attempts = []
                             for candidate_name, candidate_id in candidate_user_ids:
                                 if decrypted_message:
                                     break
@@ -1722,23 +1727,49 @@ def poll_messages():
                                     try:
                                         decrypt_user_id_int = int(candidate_id)
                                         if decrypt_user_id_int > 0:
-                                            decrypted_message = decrypt_message(message, v_field, decrypt_user_id_int, enc_try, debug=False)
-                                            if decrypted_message and decrypted_message != message:
-                                                has_control_chars = any(ord(c) < 32 and c not in '\n\r\t' for c in decrypted_message)
+                                            # 복호화 시도 (debug=True로 상세 로그)
+                                            decrypted_result = decrypt_message(message, v_field, decrypt_user_id_int, enc_try, debug=True)
+                                            decryption_attempts.append({
+                                                'user_id': candidate_id,
+                                                'enc': enc_try,
+                                                'result': 'success' if (decrypted_result and decrypted_result != message) else 'failed',
+                                                'name': candidate_name
+                                            })
+                                            
+                                            if decrypted_result and decrypted_result != message:
+                                                has_control_chars = any(ord(c) < 32 and c not in '\n\r\t' for c in decrypted_result)
                                                 if not has_control_chars:
+                                                    decrypted_message = decrypted_result
                                                     print(f"[✓] 메시지 복호화 성공 ({candidate_name}): ID={msg_id}, user_id={candidate_id}, enc_type={enc_try}")
-                                                    if candidate_name == 'MY_USER_ID':
+                                                    print(f"[✓] 복호화된 메시지: \"{decrypted_result[:100]}{'...' if len(decrypted_result) > 100 else ''}\"")
+                                                    if candidate_name == 'MY_USER_ID (fallback)':
                                                         print(f"[정보] MY_USER_ID로 복호화 성공했지만, 일반적으로는 발신자 user_id를 사용합니다.")
                                                     break
                                                 else:
-                                                    decrypted_message = None
                                                     print(f"[경고] 복호화된 메시지가 깨져있음 ({candidate_name}): ID={msg_id}, user_id={candidate_id}, enc_type={enc_try}")
+                                                    print(f"[경고] 제어 문자 포함: 복호화 키가 잘못되었을 가능성이 높습니다.")
                                             else:
-                                                decrypted_message = None
-                                    except Exception:
-                                        decrypted_message = None
+                                                if decrypted_result == message:
+                                                    print(f"[복호화] 결과가 원본과 동일: 복호화되지 않음 (user_id={candidate_id}, enc={enc_try})")
+                                                else:
+                                                    print(f"[복호화] None 반환: 복호화 실패 (user_id={candidate_id}, enc={enc_try})")
+                                    except Exception as e:
+                                        print(f"[복호화] 예외 발생 ({candidate_name}): user_id={candidate_id}, enc={enc_try}, 오류={type(e).__name__}: {e}")
+                                        import traceback
+                                        traceback.print_exc()
                                 if decrypted_message:
                                     break
+                            
+                            # 모든 시도가 실패한 경우 상세 로그
+                            if not decrypted_message:
+                                print(f"[✗] 모든 복호화 시도 실패: ID={msg_id}")
+                                print(f"[✗] 시도한 조합:")
+                                for attempt in decryption_attempts:
+                                    print(f"  - user_id={attempt['user_id']}, enc={attempt['enc']}, 결과={attempt['result']}, 이름={attempt['name']}")
+                                print(f"[✗] 원본 메시지: \"{message[:50]}...\" (길이: {len(message)})")
+                                print(f"[✗] v 필드: {v_field}")
+                                print(f"[✗] user_id (DB): {user_id}, kakao_user_id: {kakao_user_id}, MY_USER_ID: {MY_USER_ID}")
+                                print(f"[✗] enc_type: {enc_type}")
                             
                             if not user_id:
                                 print(f"[경고] 발신자 user_id가 없어 복호화 불가: ID={msg_id}, enc_type={enc_type}")
