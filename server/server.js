@@ -1413,10 +1413,17 @@ wss.on('connection', function connection(ws, req) {
                     console.log(`[복호화] 시도: user_id=${uid}, enc=${encTry}, 메시지 길이=${decryptedMessage.length}`);
                     // userId는 문자열로, encType은 숫자로 전달
                     const d = decryptKakaoTalkMessage(decryptedMessage, String(uid), Number(encTry));
-                    if (d) {
-                      decryptedFound = d;
-                      console.log(`[✓ 복호화 성공] 메시지 ID: ${json._id}, user_id=${uid}, enc=${encTry}, 복호화 길이: ${d.length}`);
-                      break;
+                    if (d && d !== decryptedMessage) {
+                      // 복호화된 결과가 원본과 다르고, 유효한 텍스트인지 확인
+                      const hasControlChars = /[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(d);
+                      if (!hasControlChars && d.length > 0) {
+                        decryptedFound = d;
+                        console.log(`[✓ 복호화 성공] 메시지 ID: ${json._id}, user_id=${uid}, enc=${encTry}, 복호화 길이: ${d.length}`);
+                        console.log(`[✓ 복호화 성공] 복호화된 메시지 미리보기: "${d.substring(0, 100)}${d.length > 100 ? '...' : ''}"`);
+                        break;
+                      } else {
+                        console.log(`[복호화] 복호화 결과가 유효하지 않음: 제어문자 포함 또는 빈 문자열`);
+                      }
                     }
                   }
                   if (decryptedFound) break;
