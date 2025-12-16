@@ -1379,33 +1379,47 @@ wss.on('connection', function connection(ws, req) {
               }
             }
             
-            // Iris 코드 기준: ObserverHelper.kt에서 발신자의 user_id를 사용
-            // Iris 코드: val userId = cursor.getLong(columnNames.indexOf("user_id"))
-            // Iris 코드: KakaoDecrypt.decrypt(enc, message, userId) - 발신자의 user_id 사용
-            // 따라서 복호화에는 발신자의 user_id를 사용해야 함
-            const senderUserId = json.userId || json.user_id;  // 발신자 user_id (우선 사용, 문자열 유지)
-            const myUserId = json.myUserId;  // 자신의 user_id (참고용, fallback용)
-            console.log(`[복호화] 발신자 userId: ${senderUserId}, myUserId: ${myUserId}, 타입: ${typeof senderUserId}`);
-            console.log(`[디버그] json.userId=${json.userId}, json.user_id=${json.user_id}, 선택된 senderUserId=${senderUserId}`);
+            // ⚠️ 중요: 정상 작동 코드(55baa72) 기준으로 MY_USER_ID를 우선 사용
+            // 클라이언트에서도 MY_USER_ID로 복호화하므로 서버에서도 동일하게 처리
+            const myUserId = json.myUserId;  // 자신의 user_id (우선 사용)
+            const senderUserId = json.user_id || json.userId;  // 발신자 user_id (fallback용, 하지만 잘못된 값일 수 있음)
             
-            // 카카오톡 복호화 시도 (발신자 user_id 우선 사용, Iris 코드 기준)
-            if (senderUserId) {
+            // userId=1 같은 잘못된 값 필터링
+            const isValidUserId = (uid) => {
+              if (!uid) return false;
+              const uidNum = Number(uid);
+              return uidNum > 1000;  // 1000보다 큰 값만 유효한 user_id로 간주
+            };
+            
+            console.log(`[복호화] myUserId: ${myUserId}, senderUserId: ${senderUserId}`);
+            console.log(`[디버그] json.userId=${json.userId}, json.user_id=${json.user_id}, json.myUserId=${json.myUserId}`);
+            
+            // 카카오톡 복호화 시도 (MY_USER_ID 우선 사용, 정상 작동 코드 기준)
+            const decryptUserId = isValidUserId(myUserId) ? myUserId : (isValidUserId(senderUserId) ? senderUserId : null);
+            
+            if (decryptUserId) {
               try {
-                // enc 후보: 우선 enc (v 필드 또는 json.encType에서 추출한 값), 이후 31, 32, 30 순으로 재시도
+                // enc 후보: 우선 enc (v 필드 또는 json.encType에서 추출한 값), 이후 31, 30, 32 순으로 재시도
                 // kakaodecrypt.py 테스트에서 enc=31이 가장 일반적이므로 우선순위 높임
                 const encCandidates = [];
                 if (enc !== undefined && enc !== null) encCandidates.push(enc);
                 // 기본값 31을 우선 시도 (가장 일반적)
                 encCandidates.push(31);
                 // 다른 후보들
-                encCandidates.push(32, 30);
+                encCandidates.push(30, 32);
                 const encUnique = Array.from(new Set(encCandidates));
-                console.log(`[복호화] enc 후보 목록: ${encUnique.join(', ')}`);
+                console.log(`[복호화] enc 후보 목록: ${encUnique.join(', ')}, 사용할 user_id: ${decryptUserId} (${isValidUserId(myUserId) ? 'MY_USER_ID' : 'senderUserId'})`);
 
-                // userId 후보: 발신자 → myUserId
+                // userId 후보: MY_USER_ID 우선, 없으면 senderUserId
                 const userCandidates = [];
-                userCandidates.push(String(senderUserId));
-                if (myUserId && myUserId != senderUserId) userCandidates.push(String(myUserId));
+                if (isValidUserId(myUserId)) {
+                  userCandidates.push(String(myUserId));
+                  console.log(`[복호화] MY_USER_ID 우선 사용: ${myUserId}`);
+                }
+                if (isValidUserId(senderUserId) && senderUserId != myUserId) {
+                  userCandidates.push(String(senderUserId));
+                  console.log(`[복호화] senderUserId fallback 추가: ${senderUserId}`);
+                }
 
                 let decryptedFound = null;
                 for (const uid of userCandidates) {
@@ -1435,6 +1449,8 @@ wss.on('connection', function connection(ws, req) {
                 } else {
                   console.log(`[✗ 복호화 실패] 메시지 ID: ${json._id}, 모든 enc/userId 시도 실패`);
                   console.log(`[경고] 복호화 실패했지만 원본 메시지를 사용하여 계속 진행합니다.`);
+                  console.log(`[디버그] 시도한 user_id 후보: ${userCandidates.join(', ')}, enc 후보: ${encUnique.join(', ')}`);
+                  console.log(`[디버그] MY_USER_ID 유효성: ${isValidUserId(myUserId)}, senderUserId 유효성: ${isValidUserId(senderUserId)}`);
                   // 복호화 실패해도 원본 메시지를 사용 (명령어 매칭을 위해)
                 }
               } catch (e) {
