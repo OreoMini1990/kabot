@@ -5,27 +5,213 @@
 const db = require('./database');
 
 /**
+ * 사용자 조회 또는 생성 (정규화된 users 테이블 사용)
+ */
+async function getOrCreateUser(roomName, senderName, senderId) {
+    try {
+        // internal_user_id 생성
+        const internalUserId = require('crypto')
+            .createHash('md5')
+            .update(`${roomName}|${senderName}|${senderId || ''}`)
+            .digest('hex');
+        
+        // 기존 사용자 조회
+        const { data: existingUser } = await db.supabase
+            .from('users')
+            .select('*')
+            .eq('internal_user_id', internalUserId)
+            .single();
+        
+        if (existingUser) {
+            // 이름이 변경되었는지 확인
+            if (existingUser.display_name !== senderName) {
+                // 이름 변경 이력 저장
+                await db.supabase
+                    .from('user_name_history')
+                    .insert({
+                        user_id: existingUser.id,
+                        old_name: existingUser.display_name,
+                        new_name: senderName
+                    });
+                
+                // 사용자 정보 업데이트
+                await db.supabase
+                    .from('users')
+                    .update({
+                        display_name: senderName,
+                        last_seen_at: new Date().toISOString()
+                    })
+                    .eq('id', existingUser.id);
+            } else {
+                // last_seen_at만 업데이트
+                await db.supabase
+                    .from('users')
+                    .update({
+                        last_seen_at: new Date().toISOString()
+                    })
+                    .eq('id', existingUser.id);
+            }
+            
+            return existingUser;
+        }
+        
+        // 새 사용자 생성
+        const { data: newUser, error: createError } = await db.supabase
+            .from('users')
+            .insert({
+                internal_user_id: internalUserId,
+                kakao_user_id: senderId || null,
+                display_name: senderName,
+                original_name: senderName,
+                last_seen_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+        
+        if (createError) {
+            console.error('[채팅 로그] 사용자 생성 실패:', createError.message);
+            return null;
+        }
+        
+        return newUser;
+    } catch (error) {
+        console.error('[채팅 로그] 사용자 조회/생성 중 오류:', error.message);
+        return null;
+    }
+}
+
+/**
+ * 채팅방 조회 또는 생성
+ */
+async function getOrCreateRoom(roomName, roomType = 'group') {
+    try {
+        // 기존 채팅방 조회
+        const { data: existingRoom } = await db.supabase
+            .from('rooms')
+            .select('*')
+            .eq('room_name', roomName)
+            .single();
+        
+        if (existingRoom) {
+            return existingRoom;
+        }
+        
+        // 새 채팅방 생성
+        const { data: newRoom, error: createError } = await db.supabase
+            .from('rooms')
+            .insert({
+                room_name: roomName,
+                room_type: roomType
+            })
+            .select()
+            .single();
+        
+        if (createError) {
+            console.error('[채팅 로그] 채팅방 생성 실패:', createError.message);
+            return null;
+        }
+        
+        return newRoom;
+    } catch (error) {
+        console.error('[채팅 로그] 채팅방 조회/생성 중 오류:', error.message);
+        return null;
+    }
+}
+
+/**
+ * 채팅방 멤버십 확인 또는 추가
+ */
+async function ensureRoomMembership(roomId, userId, role = 'member') {
+    try {
+        // 기존 멤버십 확인
+        const { data: existing } = await db.supabase
+            .from('room_members')
+            .select('*')
+            .eq('room_id', roomId)
+            .eq('user_id', userId)
+            .single();
+        
+        if (existing) {
+            // 이미 멤버이면 활성화 상태만 업데이트
+            if (!existing.is_active) {
+                await db.supabase
+                    .from('room_members')
+                    .update({
+                        is_active: true,
+                        left_at: null
+                    })
+                    .eq('id', existing.id);
+            }
+            return existing;
+        }
+        
+        // 새 멤버십 생성
+        const { data: newMembership, error: createError } = await db.supabase
+            .from('room_members')
+            .insert({
+                room_id: roomId,
+                user_id: userId,
+                role: role
+            })
+            .select()
+            .single();
+        
+        if (createError) {
+            console.error('[채팅 로그] 멤버십 생성 실패:', createError.message);
+            return null;
+        }
+        
+        return newMembership;
+    } catch (error) {
+        console.error('[채팅 로그] 멤버십 확인/생성 중 오류:', error.message);
+        return null;
+    }
+}
+
+/**
  * 채팅 메시지 저장
  */
-async function saveChatMessage(roomName, senderName, senderId, messageText, isGroupChat = true) {
+async function saveChatMessage(roomName, senderName, senderId, messageText, isGroupChat = true, metadata = null) {
     try {
+        // 정규화된 사용자 및 채팅방 조회/생성
+        const user = await getOrCreateUser(roomName, senderName, senderId);
+        const room = await getOrCreateRoom(roomName, isGroupChat ? 'group' : 'direct');
+        
+        if (!user || !room) {
+            console.error('[채팅 로그] 사용자 또는 채팅방 조회 실패');
+            // 정규화 실패 시에도 기존 방식으로 저장 (하위 호환성)
+        }
+        
+        // 멤버십 확인/생성
+        if (user && room) {
+            await ensureRoomMembership(room.id, user.id);
+        }
+        
         // 메시지 분석
         const wordCount = messageText.trim().split(/\s+/).filter(w => w.length > 0).length;
         const charCount = messageText.length;
         const hasMention = /@\w+/.test(messageText);
         const hasUrl = /https?:\/\/[^\s]+/.test(messageText);
         const hasImage = /\.(jpg|jpeg|png|gif|webp)/i.test(messageText) || messageText.includes('📷') || messageText.includes('이미지');
+        const hasFile = /\.(pdf|doc|docx|xls|xlsx|zip|rar)/i.test(messageText);
+        const hasVideo = /\.(mp4|avi|mov|wmv|flv)/i.test(messageText);
+        const hasLocation = /위치|location|지도/i.test(messageText);
         
         // 메시지 타입 결정
         let messageType = 'text';
         if (hasImage) messageType = 'image';
-        else if (hasUrl) messageType = 'url';
+        else if (hasVideo) messageType = 'video';
+        else if (hasFile) messageType = 'file';
+        else if (hasLocation) messageType = 'location';
+        else if (hasUrl) messageType = 'link';
         
-        // room_user_key는 GENERATED 컬럼이므로 자동 생성됨
+        // room_user_key와 message_text_tsvector는 GENERATED 컬럼이므로 자동 생성됨
         const { data, error } = await db.supabase
             .from('chat_messages')
             .insert({
+                room_id: room?.id || null,
                 room_name: roomName,
+                user_id: user?.id || null,
                 sender_name: senderName,
                 sender_id: senderId || null,
                 message_text: messageText,
@@ -35,8 +221,11 @@ async function saveChatMessage(roomName, senderName, senderId, messageText, isGr
                 char_count: charCount,
                 has_mention: hasMention,
                 has_url: hasUrl,
-                has_image: hasImage
-                // room_user_key와 message_text_tsvector는 GENERATED 컬럼이므로 자동 생성
+                has_image: hasImage,
+                has_file: hasFile,
+                has_video: hasVideo,
+                has_location: hasLocation,
+                metadata: metadata || null
             })
             .select()
             .single();
@@ -44,6 +233,20 @@ async function saveChatMessage(roomName, senderName, senderId, messageText, isGr
         if (error) {
             console.error('[채팅 로그] 메시지 저장 실패:', error.message);
             return null;
+        }
+        
+        // 멘션 저장 (비동기)
+        if (hasMention && data) {
+            saveMentions(data.id, mentionedUserNames).catch(err => {
+                console.error('[채팅 로그] 멘션 저장 실패:', err.message);
+            });
+        }
+        
+        // 사용자 활동 업데이트 (비동기)
+        if (user && room) {
+            updateUserActivity(room.id, user.id, roomName, senderName).catch(err => {
+                console.error('[채팅 로그] 활동 업데이트 실패:', err.message);
+            });
         }
         
         // 사용자 통계 업데이트 (비동기)
@@ -55,6 +258,52 @@ async function saveChatMessage(roomName, senderName, senderId, messageText, isGr
     } catch (error) {
         console.error('[채팅 로그] 메시지 저장 중 오류:', error.message);
         return null;
+    }
+}
+
+/**
+ * 사용자 활동 업데이트
+ */
+async function updateUserActivity(roomId, userId, roomName, senderName) {
+    try {
+        const now = new Date().toISOString();
+        
+        // 기존 활동 기록 조회
+        const { data: existing } = await db.supabase
+            .from('user_activity')
+            .select('*')
+            .eq('user_id', userId)
+            .eq('room_id', roomId)
+            .single();
+        
+        if (existing) {
+            // 업데이트
+            await db.supabase
+                .from('user_activity')
+                .update({
+                    last_seen_at: now,
+                    last_message_at: now,
+                    total_messages_sent: existing.total_messages_sent + 1,
+                    is_active: true
+                })
+                .eq('id', existing.id);
+        } else {
+            // 새로 생성
+            await db.supabase
+                .from('user_activity')
+                .insert({
+                    user_id: userId,
+                    user_name: senderName,
+                    room_id: roomId,
+                    room_name: roomName,
+                    last_seen_at: now,
+                    last_message_at: now,
+                    total_messages_sent: 1,
+                    is_active: true
+                });
+        }
+    } catch (error) {
+        console.error('[채팅 로그] 활동 업데이트 오류:', error.message);
     }
 }
 
@@ -383,9 +632,185 @@ async function getMostReactedUser(roomName, startDate, endDate) {
     }
 }
 
+/**
+ * 메시지 수정 저장
+ */
+async function saveMessageEdit(messageId, editedText, editedByUserId = null, editReason = null) {
+    try {
+        // 원본 메시지 조회
+        const { data: message } = await db.supabase
+            .from('chat_messages')
+            .select('message_text, edit_count')
+            .eq('id', messageId)
+            .single();
+        
+        if (!message) {
+            console.error('[채팅 로그] 메시지를 찾을 수 없음:', messageId);
+            return null;
+        }
+        
+        // 수정 이력 저장
+        await db.supabase
+            .from('message_edits')
+            .insert({
+                message_id: messageId,
+                edited_by_user_id: editedByUserId,
+                original_text: message.message_text,
+                edited_text: editedText,
+                edit_reason: editReason
+            });
+        
+        // 메시지 업데이트
+        const { data: updated, error } = await db.supabase
+            .from('chat_messages')
+            .update({
+                message_text: editedText,
+                is_edited: true,
+                edited_at: new Date().toISOString(),
+                edit_count: (message.edit_count || 0) + 1,
+                original_message_text: message.original_message_text || message.message_text
+            })
+            .eq('id', messageId)
+            .select()
+            .single();
+        
+        if (error) {
+            console.error('[채팅 로그] 메시지 수정 실패:', error.message);
+            return null;
+        }
+        
+        return updated;
+    } catch (error) {
+        console.error('[채팅 로그] 메시지 수정 중 오류:', error.message);
+        return null;
+    }
+}
+
+/**
+ * 메시지 삭제 저장
+ */
+async function saveMessageDeletion(messageId, deletedByUserId = null, deletionReason = null, deletionType = 'user') {
+    try {
+        // 삭제 이력 저장
+        await db.supabase
+            .from('message_deletions')
+            .insert({
+                message_id: messageId,
+                deleted_by_user_id: deletedByUserId,
+                deletion_reason: deletionReason,
+                deletion_type: deletionType
+            });
+        
+        // 메시지 업데이트
+        const { data: updated, error } = await db.supabase
+            .from('chat_messages')
+            .update({
+                is_deleted: true,
+                deleted_at: new Date().toISOString(),
+                deleted_by_user_id: deletedByUserId
+            })
+            .eq('id', messageId)
+            .select()
+            .single();
+        
+        if (error) {
+            console.error('[채팅 로그] 메시지 삭제 실패:', error.message);
+            return null;
+        }
+        
+        return updated;
+    } catch (error) {
+        console.error('[채팅 로그] 메시지 삭제 중 오류:', error.message);
+        return null;
+    }
+}
+
+/**
+ * 멘션 저장
+ */
+async function saveMentions(messageId, mentionedUserNames, mentionedUserIds = []) {
+    try {
+        const mentions = [];
+        
+        for (let i = 0; i < mentionedUserNames.length; i++) {
+            const userName = mentionedUserNames[i];
+            const userId = mentionedUserIds[i] || null;
+            
+            // 사용자 조회
+            let user = null;
+            if (userId) {
+                const { data } = await db.supabase
+                    .from('users')
+                    .select('id')
+                    .eq('kakao_user_id', userId)
+                    .single();
+                user = data;
+            }
+            
+            mentions.push({
+                message_id: messageId,
+                mentioned_user_id: user?.id || null,
+                mentioned_user_name: userName,
+                mention_type: userName === 'all' || userName === 'here' ? userName : 'direct'
+            });
+        }
+        
+        if (mentions.length > 0) {
+            const { error } = await db.supabase
+                .from('message_mentions')
+                .insert(mentions);
+            
+            if (error) {
+                console.error('[채팅 로그] 멘션 저장 실패:', error.message);
+            }
+        }
+    } catch (error) {
+        console.error('[채팅 로그] 멘션 저장 중 오류:', error.message);
+    }
+}
+
+/**
+ * 첨부 파일 정보 저장
+ */
+async function saveAttachment(messageId, attachmentType, attachmentUrl, attachmentName = null, attachmentSize = null, mimeType = null, thumbnailUrl = null, metadata = null) {
+    try {
+        const { data, error } = await db.supabase
+            .from('message_attachments')
+            .insert({
+                message_id: messageId,
+                attachment_type: attachmentType,
+                attachment_url: attachmentUrl,
+                attachment_name: attachmentName,
+                attachment_size: attachmentSize,
+                mime_type: mimeType,
+                thumbnail_url: thumbnailUrl,
+                metadata: metadata
+            })
+            .select()
+            .single();
+        
+        if (error) {
+            console.error('[채팅 로그] 첨부 파일 저장 실패:', error.message);
+            return null;
+        }
+        
+        return data;
+    } catch (error) {
+        console.error('[채팅 로그] 첨부 파일 저장 중 오류:', error.message);
+        return null;
+    }
+}
+
 module.exports = {
+    getOrCreateUser,
+    getOrCreateRoom,
+    ensureRoomMembership,
     saveChatMessage,
     saveReaction,
+    saveMessageEdit,
+    saveMessageDeletion,
+    saveMentions,
+    saveAttachment,
     getChatMessagesByPeriod,
     getUserChatStatistics,
     getMostReactedUser,
