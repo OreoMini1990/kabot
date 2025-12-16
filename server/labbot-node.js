@@ -763,8 +763,27 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
     // 채팅 로거 모듈 로드 (함수 최상위에서 한 번만 선언)
     const chatLogger = require('./db/chatLogger');
     
+    // 메시지가 암호화된 상태인지 확인 (복호화 실패한 경우 대비)
+    // base64로 보이는 경우 복호화 시도 (서버에서 복호화 실패했을 수 있음)
+    let processedMsg = msg;
+    const isBase64Like = msg && msg.length > 10 && msg.length % 4 === 0 && /^[A-Za-z0-9+/=]+$/.test(msg.trim());
+    if (isBase64Like) {
+        console.log(`[handleMessage] 경고: 메시지가 여전히 암호화된 상태로 보입니다. 복호화를 시도합니다.`);
+        // 간단한 base64 디코딩 시도 (실제 복호화는 서버에서 이미 시도했지만 실패했을 수 있음)
+        try {
+            const decoded = Buffer.from(msg.trim(), 'base64').toString('utf-8');
+            // 디코딩된 결과가 유효한 텍스트인지 확인 (base64만 있는 경우 제외)
+            if (decoded && decoded.length > 0 && !decoded.match(/^[A-Za-z0-9+/=]+$/)) {
+                processedMsg = decoded;
+                console.log(`[handleMessage] base64 디코딩 성공: "${decoded.substring(0, 50)}..."`);
+            }
+        } catch (e) {
+            console.log(`[handleMessage] base64 디코딩 실패: ${e.message}`);
+        }
+    }
+    
     // ========== 신고 기능 처리 (답장 버튼 + @랩봇 멘션 + !신고) ==========
-    const msgTrimmed = msg.trim();
+    const msgTrimmed = processedMsg.trim();
     const msgLower = msgTrimmed.toLowerCase();
     const hasMention = msgTrimmed.includes(`@${CONFIG.BOT_NAME}`) || msgTrimmed.includes('@랩봇');
     // !신고 또는 ! 신고 (공백 포함) 모두 처리

@@ -1424,8 +1424,11 @@ wss.on('connection', function connection(ws, req) {
 
                 if (decryptedFound) {
                   decryptedMessage = decryptedFound;
+                  console.log(`[✓ 복호화 성공] 최종 메시지: "${decryptedMessage.substring(0, 100)}${decryptedMessage.length > 100 ? '...' : ''}"`);
                 } else {
                   console.log(`[✗ 복호화 실패] 메시지 ID: ${json._id}, 모든 enc/userId 시도 실패`);
+                  console.log(`[경고] 복호화 실패했지만 원본 메시지를 사용하여 계속 진행합니다.`);
+                  // 복호화 실패해도 원본 메시지를 사용 (명령어 매칭을 위해)
                 }
               } catch (e) {
                 console.log(`[✗ 복호화 오류] 메시지 ID: ${json._id}, 오류: ${e.message}`);
