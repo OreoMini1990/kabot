@@ -19,8 +19,8 @@ object SelectorsConfig {
     // 기본 selector 값 (selectors.json이 없을 때 사용)
     var SEARCH_BUTTON_ID: String = "com.kakao.talk:id/search_icon"
     var SEARCH_INPUT_ID: String = "com.kakao.talk:id/search_edit_text"
-    var CHAT_INPUT_ID: String = "com.kakao.talk:id/edittext_chat_input"
-    var SEND_BUTTON_ID: String = "com.kakao.talk:id/sendbutton"
+    var CHAT_INPUT_ID: String = "com.kakao.talk:id/message_edit_text"  // 실제 View ID: message_edit_text
+    var SEND_BUTTON_ID: String = "com.kakao.talk:id/send_button_layout"  // 실제 View ID: send_button_layout
     
     /**
      * selectors.json 파일에서 설정 로드

@@ -24,12 +24,15 @@ class RemoteInputSender(
         private const val KAKAO_TALK_PACKAGE = "com.kakao.talk"
     }
 
-    override suspend fun send(roomKey: String, text: String): SendResult {
+    override suspend fun send(roomKey: String, text: String, imageUrl: String?): SendResult {
         Log.i(TAG, "═══════════════════════════════════════════════════════")
         Log.i(TAG, "send() called")
         Log.i(TAG, "  roomKey: \"$roomKey\"")
         Log.i(TAG, "  text: ${text.take(100)}${if (text.length > 100) "..." else ""}")
         Log.i(TAG, "  textLength: ${text.length}")
+        if (imageUrl != null) {
+            Log.w(TAG, "  ⚠ imageUrl provided but RemoteInputSender does not support images (ignoring)")
+        }
 
         // roomKey 정규화 (알림에서 추출한 roomKey와 매칭하기 위해)
         val normalizedRoomKey = roomKey.trim()

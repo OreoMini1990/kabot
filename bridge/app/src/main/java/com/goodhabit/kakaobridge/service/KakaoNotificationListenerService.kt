@@ -6,6 +6,7 @@ import android.app.RemoteInput
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
+import com.goodhabit.kakaobridge.config.FeatureFlags
 import com.goodhabit.kakaobridge.queue.SendRequest
 import com.goodhabit.kakaobridge.queue.SendRequestDao
 import com.goodhabit.kakaobridge.queue.SendStatus
@@ -46,6 +47,13 @@ class KakaoNotificationListenerService : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         super.onNotificationPosted(sbn)
+        
+        // 접근성 기반 전송 방식일 때는 알림 처리가 필요 없음 (직접 UI 조작)
+        val sendMethod = FeatureFlags.getActiveSendMethod(this)
+        if (sendMethod == FeatureFlags.SendMethod.ACCESSIBILITY) {
+            Log.d(TAG, "Accessibility mode active, skipping notification processing")
+            return
+        }
         
         val packageName = sbn.packageName
         if (packageName != KAKAO_TALK_PACKAGE) {
@@ -300,8 +308,18 @@ class KakaoNotificationListenerService : NotificationListenerService() {
 
     /**
      * 대기 중인 전송 요청 처리
+     * 
+     * 주의: 이 메서드는 RemoteInput 방식일 때만 호출됩니다.
+     * 접근성 방식일 때는 BridgeForegroundService에서 직접 처리합니다.
      */
     private suspend fun processPendingRequests(roomKey: String) {
+        // 접근성 기반 전송 방식일 때는 처리하지 않음
+        val sendMethod = FeatureFlags.getActiveSendMethod(this)
+        if (sendMethod == FeatureFlags.SendMethod.ACCESSIBILITY) {
+            Log.d(TAG, "Accessibility mode active, skipping notification-based processing")
+            return
+        }
+        
         if (sendRequestDao == null) {
             Log.w(TAG, "SendRequestDao not initialized, skipping queue processing")
             return
@@ -317,6 +335,7 @@ class KakaoNotificationListenerService : NotificationListenerService() {
 
         for (request in pendingRequests) {
             try {
+                // RemoteInput 방식만 사용 (이 서비스는 알림 기반이므로)
                 val result = remoteInputSender.send(request.roomKey, request.text)
                 
                 when (result) {

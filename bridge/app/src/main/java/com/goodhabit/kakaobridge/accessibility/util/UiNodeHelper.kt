@@ -50,7 +50,7 @@ object UiNodeHelper {
     }
     
     /**
-     * 텍스트 포함으로 노드 찾기
+     * 텍스트 포함으로 노드 찾기 (text와 contentDescription 모두 검색)
      */
     fun findNodeByTextContains(root: AccessibilityNodeInfo, text: String): AccessibilityNodeInfo? {
         root.text?.toString()?.let { nodeText ->
@@ -74,7 +74,44 @@ object UiNodeHelper {
     }
     
     /**
-     * 노드 클릭
+     * contentDescription으로 노드 찾기 (정확히 일치)
+     */
+    fun findNodeByContentDescription(root: AccessibilityNodeInfo, description: String): AccessibilityNodeInfo? {
+        root.contentDescription?.toString()?.trim()?.let { desc ->
+            if (desc == description.trim()) {
+                Log.d(TAG, "findNodeByContentDescription: Found exact match: \"$desc\"")
+                return root
+            }
+        }
+        
+        for (i in 0 until root.childCount) {
+            root.getChild(i)?.let { child ->
+                findNodeByContentDescription(child, description)?.let { return it }
+            }
+        }
+        return null
+    }
+    
+    /**
+     * contentDescription 포함으로 노드 찾기
+     */
+    fun findNodeByContentDescriptionContains(root: AccessibilityNodeInfo, description: String): AccessibilityNodeInfo? {
+        root.contentDescription?.toString()?.trim()?.let { desc ->
+            if (desc.contains(description)) {
+                return root
+            }
+        }
+        
+        for (i in 0 until root.childCount) {
+            root.getChild(i)?.let { child ->
+                findNodeByContentDescriptionContains(child, description)?.let { return it }
+            }
+        }
+        return null
+    }
+    
+    /**
+     * 노드 클릭 (부모 클릭 폴백 포함)
      */
     fun clickNode(node: AccessibilityNodeInfo?): Boolean {
         if (node == null) {
@@ -83,20 +120,39 @@ object UiNodeHelper {
         }
         
         return try {
+            // 1순위: 노드 자체가 클릭 가능하면 클릭
             if (node.isClickable) {
-                node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-            } else {
-                // 부모 노드에서 클릭 가능한 노드 찾기
-                var parent = node.parent
-                while (parent != null) {
-                    if (parent.isClickable) {
-                        parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                val result = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                if (result) {
+                    Log.d(TAG, "Node clicked directly")
+                    return true
+                }
+            }
+            
+            // 2순위: 부모 노드에서 클릭 가능한 노드 찾기
+            var parent = node.parent
+            var depth = 0
+            while (parent != null && depth < 5) { // 최대 5단계까지 탐색
+                if (parent.isClickable) {
+                    val result = parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    if (result) {
+                        Log.d(TAG, "Parent node clicked (depth: $depth)")
                         return true
                     }
-                    parent = parent.parent
                 }
-                false
+                parent = parent.parent
+                depth++
             }
+            
+            // 3순위: 노드가 클릭 가능하지 않아도 ACTION_CLICK 시도 (일부 경우 작동)
+            val result = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            if (result) {
+                Log.d(TAG, "Node clicked despite not being marked as clickable")
+                return true
+            }
+            
+            Log.w(TAG, "Failed to click node: not clickable and no clickable parent found")
+            false
         } catch (e: Exception) {
             Log.e(TAG, "Failed to click node", e)
             false
@@ -150,4 +206,6 @@ object UiNodeHelper {
         }
     }
 }
+
+
 

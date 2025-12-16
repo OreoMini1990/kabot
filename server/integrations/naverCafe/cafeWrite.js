@@ -7,6 +7,7 @@ const axios = require('axios');
 const iconv = require('iconv-lite');
 const querystring = require('querystring');
 const { validateAccessToken } = require('./naverOAuth');
+const { validateAndRefreshToken } = require('./tokenManager');
 
 /**
  * 네이버 카페에 글 작성
@@ -33,19 +34,29 @@ async function writeCafeArticle({ subject, content, clubid, menuid, accessToken,
             };
         }
         
-        // 토큰 유효성 검증
-        const validationResult = await validateAccessToken(accessToken);
+        // 토큰 유효성 검증 및 필요시 자동 갱신
+        let validToken = accessToken;
+        const tokenValidation = await validateAndRefreshToken(accessToken);
         
-        if (!validationResult.valid) {
-            console.error(`[네이버 카페] Access Token 검증 실패: ${validationResult.error}`);
+        if (!tokenValidation.valid) {
+            console.error(`[네이버 카페] Access Token 검증 실패: ${tokenValidation.error}`);
             return {
                 success: false,
                 error: 'invalid_token',
-                message: `Access Token이 유효하지 않습니다: ${validationResult.error}. 새로운 토큰을 발급받아주세요.`
+                message: `Access Token이 유효하지 않습니다: ${tokenValidation.error}. 새로운 토큰을 발급받아주세요.`
             };
         }
         
-        console.log(`[네이버 카페] Access Token 검증 성공: 사용자=${validationResult.user_info?.name || validationResult.user_info?.id || '알 수 없음'}`);
+        if (tokenValidation.refreshed) {
+            console.log(`[네이버 카페] Access Token 자동 갱신 완료`);
+            validToken = tokenValidation.token;
+        } else {
+            // 토큰이 유효한지 한 번 더 확인 (사용자 정보 가져오기)
+            const validationResult = await validateAccessToken(accessToken);
+            if (validationResult.valid) {
+                console.log(`[네이버 카페] Access Token 검증 성공: 사용자=${validationResult.user_info?.name || validationResult.user_info?.id || '알 수 없음'}`);
+            }
+        }
         
         // ========== 2단계: 카페 글쓰기 API 호출 ==========
         // 네이버 카페 API 엔드포인트
@@ -88,11 +99,11 @@ async function writeCafeArticle({ subject, content, clubid, menuid, accessToken,
         console.log(`[네이버 카페] 글쓰기 요청: clubid=${clubid}, menuid=${menuid}, headid=${headid !== null && headid !== undefined ? headid : '없음'}, 제목=${subject.substring(0, 30)}...`);
         console.log(`[네이버 카페] formData (일부): ${formData.substring(0, 200)}...`);
         
-        // API 호출
+        // API 호출 (갱신된 토큰 사용)
         const response = await axios.post(apiUrl, formData, {
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'Authorization': `Bearer ${accessToken}`
+                'Authorization': `Bearer ${validToken}`
             },
             maxRedirects: 0,
             validateStatus: (status) => status >= 200 && status < 400

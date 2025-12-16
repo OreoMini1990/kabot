@@ -10,3 +10,5 @@
     android:canRequestFilterKeyEvents="false"
     android:settingsActivity="com.goodhabit.kakaobridge.MainActivity" />
 
+
+

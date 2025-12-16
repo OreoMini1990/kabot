@@ -137,3 +137,5 @@ ON CONFLICT (word) DO NOTHING;
 --    SELECT COUNT(*) FROM profanity_words WHERE type = 'job_discrimination';
 --
 -- ============================================
+
+

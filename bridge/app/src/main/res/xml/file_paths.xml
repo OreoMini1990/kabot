@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 캐시 디렉토리 접근 허용 (이미지 임시 저장용) -->
+    <cache-path name="cache" path="." />
+    <!-- 이미지 캐시 서브디렉토리 -->
+    <cache-path name="images" path="images/" />
+    <!-- 외부 캐시 디렉토리 (선택사항) -->
+    <external-cache-path name="external_cache" path="." />
+</paths>
+

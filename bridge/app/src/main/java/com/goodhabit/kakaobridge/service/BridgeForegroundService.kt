@@ -52,10 +52,15 @@ class BridgeForegroundService : Service() {
     private var accessibilitySender: AccessibilitySender? = null
     private var activeSender: MessageSender? = null // 기능 플래그에 따라 선택된 전송 방식
     private var wakeLock: PowerManager.WakeLock? = null
+    private var reconnectJob: kotlinx.coroutines.Job? = null
+    private var reconnectAttempts = 0
+    private val MAX_RECONNECT_ATTEMPTS = 10
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "Service created")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        Log.i(TAG, "🚀🚀🚀 BridgeForegroundService.onCreate() 호출됨 🚀🚀🚀")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
 
         // WakeLock 획득 (항상 깨어있도록)
         val powerManager = getSystemService(PowerManager::class.java)
@@ -77,50 +82,73 @@ class BridgeForegroundService : Service() {
         // Selector 설정 로드
         SelectorsConfig.loadFromAssets(this)
         
-        // 기능 플래그에 따라 전송 방식 선택
-        val sendMethod = FeatureFlags.getActiveSendMethod(this)
-        Log.i(TAG, "Active send method: ${sendMethod.name}")
+        // 접근성 서비스가 활성화되어 있는지 확인 (AccessibilityManager 사용)
+        val isAccessibilityEnabled = KakaoAutomationService.isServiceEnabled(this)
+        val automationServiceInstance = KakaoAutomationService.getInstance()
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        Log.i(TAG, "Checking AccessibilityService:")
+        Log.i(TAG, "  isServiceEnabled(context): $isAccessibilityEnabled")
+        Log.i(TAG, "  getInstance() != null: ${automationServiceInstance != null}")
         
-        when (sendMethod) {
-            FeatureFlags.SendMethod.ACCESSIBILITY -> {
-                // 접근성 기반 전송 방식 (새로운 방식)
-                val automationService = KakaoAutomationService.getInstance()
-                if (automationService != null) {
-                    accessibilitySender = AccessibilitySender(this, automationService)
-                    activeSender = accessibilitySender
-                    Log.i(TAG, "AccessibilitySender initialized")
-                } else {
-                    Log.w(TAG, "AccessibilityService not available, falling back to RemoteInputSender")
-                    // Fallback to RemoteInputSender
-                    val notificationCache = NotificationActionCache()
-                    remoteInputSender = RemoteInputSender(this, notificationCache)
-                    activeSender = remoteInputSender
-                    
-                    // 캐시 정리 태스크 시작
-                    serviceScope.launch {
-                        cleanupCachePeriodically(notificationCache)
-                    }
-                }
-            }
-            FeatureFlags.SendMethod.REMOTE_INPUT -> {
-                // 알림 기반 전송 방식 (기존 방식)
-                val notificationCache = NotificationActionCache()
-                remoteInputSender = RemoteInputSender(this, notificationCache)
-                activeSender = remoteInputSender
-                Log.i(TAG, "RemoteInputSender initialized")
-                
-                // 캐시 정리 태스크 시작
-                serviceScope.launch {
-                    cleanupCachePeriodically(notificationCache)
-                }
-            }
+        // 하이브리드 모드: RemoteInput 우선, 알림이 없으면 Accessibility로 fallback
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        Log.i(TAG, "HYBRID MODE: RemoteInput 우선, Accessibility fallback")
+        Log.i(TAG, "  Strategy: Try RemoteInput first, fallback to Accessibility if no notification")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        
+        // 두 sender 모두 초기화
+        // 1. RemoteInputSender 초기화 (항상)
+        val notificationCache = NotificationActionCache()
+        remoteInputSender = RemoteInputSender(this, notificationCache)
+        Log.i(TAG, "✓ RemoteInputSender initialized")
+        
+        // 캐시 정리 태스크 시작
+        serviceScope.launch {
+            cleanupCachePeriodically(notificationCache)
         }
+        
+        // 2. AccessibilitySender 초기화 (접근성 서비스가 활성화되어 있으면)
+        if (isAccessibilityEnabled) {
+            val automationService = KakaoAutomationService.getInstance()
+            if (automationService != null) {
+                accessibilitySender = AccessibilitySender(this, automationService)
+                Log.i(TAG, "✓ AccessibilitySender initialized (service connected)")
+            } else {
+                Log.i(TAG, "⚠ AccessibilityService enabled but not connected yet")
+                Log.i(TAG, "  AccessibilitySender will be initialized when service connects")
+            }
+        } else {
+            Log.w(TAG, "⚠ AccessibilityService NOT enabled in settings")
+            Log.w(TAG, "  Fallback to Accessibility will not be available")
+            Log.w(TAG, "  To enable: Settings > Accessibility > Installed services > KakaoBridge")
+        }
+        
+        // 기본 sender는 RemoteInputSender (우선 사용)
+        activeSender = remoteInputSender
+        
+        Log.i(TAG, "Final configuration:")
+        Log.i(TAG, "  Primary sender: RemoteInputSender (notification reply)")
+        Log.i(TAG, "  Fallback sender: AccessibilitySender (if enabled)")
+        Log.i(TAG, "  RemoteInputSender available: ${remoteInputSender != null}")
+        Log.i(TAG, "  AccessibilitySender available: ${accessibilitySender != null}")
+        Log.i(TAG, "  Strategy: Try RemoteInput → if WaitingNotification → use Accessibility")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
 
         // 서비스 상태 브로드캐스트 전송
         broadcastServiceState(true)
 
         // WebSocket 연결 시작
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        Log.i(TAG, "📡 WebSocket 연결 시작 예약")
+        Log.i(TAG, "  serviceScope: ${serviceScope}")
+        Log.i(TAG, "  Dispatchers.Main: ${kotlinx.coroutines.Dispatchers.Main}")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        
         serviceScope.launch {
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
+            Log.i(TAG, "📡📡📡 WebSocket 연결 코루틴 시작 📡📡📡")
+            Log.i(TAG, "  현재 스레드: ${Thread.currentThread().name}")
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
             startWebSocketConnection()
         }
 
@@ -131,7 +159,13 @@ class BridgeForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "Service started")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        Log.i(TAG, "▶▶▶ BridgeForegroundService.onStartCommand() 호출됨 ▶▶▶")
+        Log.i(TAG, "  intent: $intent")
+        Log.i(TAG, "  flags: $flags")
+        Log.i(TAG, "  startId: $startId")
+        Log.i(TAG, "  webSocketClient != null: ${webSocketClient != null}")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
         return START_STICKY // 서비스가 종료되면 자동 재시작
     }
 
@@ -163,6 +197,8 @@ class BridgeForegroundService : Service() {
             Log.e(TAG, "Failed to save service state", e)
         }
         
+        reconnectJob?.cancel()
+        reconnectJob = null
         webSocketClient?.close()
         serviceScope.cancel()
     }
@@ -232,41 +268,90 @@ class BridgeForegroundService : Service() {
      * WebSocket 연결 시작
      */
     private suspend fun startWebSocketConnection() {
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        Log.i(TAG, "📡📡📡 startWebSocketConnection() 시작 📡📡📡")
+        Log.i(TAG, "  현재 스레드: ${Thread.currentThread().name}")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        
         // TODO: SharedPreferences에서 WebSocket URL 읽기
         val wsUrl = getSharedPreferences("bridge_prefs", MODE_PRIVATE)
             .getString("websocket_url", "ws://211.218.42.222:5002/ws") ?: "ws://211.218.42.222:5002/ws"
 
         Log.i(TAG, "═══════════════════════════════════════════════════════")
-        Log.i(TAG, "Connecting to WebSocket: $wsUrl")
+        Log.i(TAG, "🔌 WebSocket 연결 시도")
+        Log.i(TAG, "  URL: $wsUrl")
+        Log.i(TAG, "  기존 webSocketClient != null: ${webSocketClient != null}")
         Log.i(TAG, "═══════════════════════════════════════════════════════")
 
         webSocketClient = BridgeWebSocketClient(
             url = wsUrl,
             onMessage = { message ->
-                Log.d(TAG, "WebSocket message callback triggered")
+                Log.i(TAG, "═══════════════════════════════════════════════════════")
+                Log.i(TAG, "🔔🔔🔔 WebSocket message callback triggered 🔔🔔🔔")
+                Log.i(TAG, "  Message length: ${message.length}")
+                Log.i(TAG, "  Message preview: ${message.take(200)}${if (message.length > 200) "..." else ""}")
+                Log.i(TAG, "═══════════════════════════════════════════════════════")
+                // 메시지를 받으면 재연결 시도 횟수 초기화
+                reconnectAttempts = 0
                 serviceScope.launch {
                     handleWebSocketMessage(message)
                 }
             },
             onError = { error ->
                 Log.e(TAG, "✗✗✗ WebSocket error callback", error)
+                Log.e(TAG, "Error details: ${error.message}", error)
+                // 에러 발생 시 재연결 시도
+                scheduleReconnect()
             },
             onClose = {
-                Log.w(TAG, "⚠ WebSocket closed callback, reconnecting in 5 seconds...")
-                // 재연결 시도
-                serviceScope.launch {
-                    delay(5000)
-                    startWebSocketConnection()
-                }
+                Log.w(TAG, "⚠ WebSocket closed callback")
+                // 연결 종료 시 재연결 시도
+                scheduleReconnect()
             }
         )
 
         Log.i(TAG, "Calling webSocketClient.connect()...")
+        Log.i(TAG, "  webSocketClient != null: ${webSocketClient != null}")
         try {
             webSocketClient?.connect()
             Log.i(TAG, "✓ webSocketClient.connect() called successfully")
+            Log.i(TAG, "  Waiting for onOpen callback...")
         } catch (e: Exception) {
-            Log.e(TAG, "✗ Failed to call webSocketClient.connect()", e)
+            Log.e(TAG, "═══════════════════════════════════════════════════════")
+            Log.e(TAG, "✗✗✗ Failed to call webSocketClient.connect() ✗✗✗")
+            Log.e(TAG, "  오류: ${e.message}")
+            Log.e(TAG, "  스택 트레이스:", e)
+            Log.e(TAG, "═══════════════════════════════════════════════════════")
+            scheduleReconnect()
+        }
+    }
+    
+    /**
+     * WebSocket 재연결 스케줄링
+     */
+    private fun scheduleReconnect() {
+        // 기존 재연결 작업 취소
+        reconnectJob?.cancel()
+        
+        reconnectAttempts++
+        
+        if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+            Log.e(TAG, "✗✗✗ 최대 재연결 시도 횟수 초과 (${MAX_RECONNECT_ATTEMPTS}회). 재연결 중단.")
+            reconnectAttempts = 0 // 다음 수동 연결을 위해 초기화
+            return
+        }
+        
+        // 지수 백오프: 5초, 10초, 20초, 40초... 최대 60초
+        val delayMs = minOf(5000L * (1 shl (reconnectAttempts - 1)), 60000L)
+        
+        Log.w(TAG, "⚠ WebSocket 재연결 시도 ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS} (${delayMs}ms 후)")
+        
+        reconnectJob = serviceScope.launch {
+            delay(delayMs)
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
+            Log.i(TAG, "재연결 시도 시작...")
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
+            startWebSocketConnection()
         }
     }
 
@@ -275,31 +360,57 @@ class BridgeForegroundService : Service() {
      */
     private suspend fun handleWebSocketMessage(message: String) {
         Log.i(TAG, "═══════════════════════════════════════════════════════")
-        Log.i(TAG, "Received WebSocket message: ${message.take(200)}${if (message.length > 200) "..." else ""}")
+        Log.i(TAG, "📨📨📨 handleWebSocketMessage 호출됨 📨📨📨")
+        Log.i(TAG, "  Message length: ${message.length}")
+        Log.i(TAG, "  Message preview: ${message.take(200)}${if (message.length > 200) "..." else ""}")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
 
         try {
             val json = org.json.JSONObject(message)
             val type = json.optString("type")
 
-            Log.d(TAG, "Message type: $type")
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
+            Log.i(TAG, "JSON 파싱 성공:")
+            Log.i(TAG, "  type: \"$type\"")
+            Log.i(TAG, "  JSON keys: ${json.keys().asSequence().joinToString(", ")}")
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
 
             when (type) {
                 "send" -> {
+                    Log.i(TAG, "═══════════════════════════════════════════════════════")
+                    Log.i(TAG, "✓✓✓ type='send' 메시지 처리 시작 ✓✓✓")
+                    
                     val id = json.optString("id", UUID.randomUUID().toString())
                     var roomKey = json.optString("roomKey")
                     val text = json.optString("text")
+                    val imageUrl = json.optString("imageUrl", "").takeIf { it.isNotBlank() }
+                    
+                    Log.i(TAG, "  원본 파라미터:")
+                    Log.i(TAG, "    id: \"$id\"")
+                    Log.i(TAG, "    roomKey (raw): \"$roomKey\"")
+                    Log.i(TAG, "    text: \"${text.take(50)}${if (text.length > 50) "..." else ""}\"")
+                    Log.i(TAG, "    imageUrl: ${imageUrl ?: "null"}")
 
                     // roomKey 정규화 (알림에서 추출한 roomKey와 매칭하기 위해)
                     roomKey = normalizeRoomKey(roomKey)
 
+                    Log.i(TAG, "═══════════════════════════════════════════════════════")
                     Log.i(TAG, "Processing send request:")
                     Log.i(TAG, "  id: $id")
                     Log.i(TAG, "  roomKey (normalized): \"$roomKey\"")
                     Log.i(TAG, "  textLength: ${text.length}")
+                    Log.i(TAG, "  text: ${text.take(50)}${if (text.length > 50) "..." else ""}")
+                    if (imageUrl != null) {
+                        Log.i(TAG, "  ═══ IMAGE URL DETECTED ═══")
+                        Log.i(TAG, "  imageUrl: $imageUrl")
+                    } else {
+                        Log.i(TAG, "  imageUrl: null (no image)")
+                    }
+                    Log.i(TAG, "═══════════════════════════════════════════════════════")
 
-                    if (roomKey.isBlank() || text.isBlank()) {
-                        Log.w(TAG, "✗ Invalid send message: roomKey='$roomKey', text='${text.take(50)}'")
-                        sendAck(id, "FAILED", "Invalid message: roomKey or text is empty")
+                    if (roomKey.isBlank() || (text.isBlank() && imageUrl == null)) {
+                        Log.w(TAG, "✗ Invalid send message: roomKey='$roomKey', text='${text.take(50)}', imageUrl=$imageUrl")
+                        sendAck(id, "FAILED", "Invalid message: roomKey is empty or both text and imageUrl are empty")
                         return
                     }
 
@@ -326,7 +437,8 @@ class BridgeForegroundService : Service() {
                         text = text,
                         status = SendStatus.PENDING,
                         createdAt = System.currentTimeMillis(),
-                        updatedAt = System.currentTimeMillis()
+                        updatedAt = System.currentTimeMillis(),
+                        imageUrl = imageUrl
                     )
 
                     try {
@@ -339,16 +451,32 @@ class BridgeForegroundService : Service() {
                     }
 
                     // 즉시 전송 시도
+                    Log.i(TAG, "═══════════════════════════════════════════════════════")
+                    Log.i(TAG, "🚀🚀🚀 processSendRequest 호출 시작 🚀🚀🚀")
+                    Log.i(TAG, "  request.id: ${request.id}")
+                    Log.i(TAG, "  request.roomKey: \"${request.roomKey}\"")
+                    Log.i(TAG, "  request.text.length: ${request.text.length}")
+                    Log.i(TAG, "  request.imageUrl: ${request.imageUrl ?: "null"}")
+                    Log.i(TAG, "═══════════════════════════════════════════════════════")
+                    
                     serviceScope.launch {
                         processSendRequest(request)
                     }
                 }
                 else -> {
-                    Log.w(TAG, "Unknown message type: $type")
+                    Log.w(TAG, "═══════════════════════════════════════════════════════")
+                    Log.w(TAG, "⚠⚠⚠ Unknown message type: \"$type\" ⚠⚠⚠")
+                    Log.w(TAG, "  전체 메시지: $message")
+                    Log.w(TAG, "═══════════════════════════════════════════════════════")
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "✗ Failed to parse WebSocket message: ${e.message}", e)
+            Log.e(TAG, "═══════════════════════════════════════════════════════")
+            Log.e(TAG, "✗✗✗ Failed to parse WebSocket message ✗✗✗")
+            Log.e(TAG, "  오류: ${e.message}")
+            Log.e(TAG, "  메시지: ${message.take(500)}")
+            Log.e(TAG, "  스택 트레이스:", e)
+            Log.e(TAG, "═══════════════════════════════════════════════════════")
         }
         Log.i(TAG, "═══════════════════════════════════════════════════════")
     }
@@ -366,98 +494,205 @@ class BridgeForegroundService : Service() {
     /**
      * 전송 요청 처리
      * 
-     * 기능 플래그에 따라 선택된 전송 방식 사용
+     * 하이브리드 모드일 때는 첫 번째 방식 실패 시 자동으로 두 번째 방식으로 fallback
      */
     private suspend fun processSendRequest(request: SendRequest) {
-        val sender = activeSender ?: run {
-            Log.e(TAG, "No active sender available, cannot process request: id=${request.id}")
-            val dao = sendRequestDao ?: return
-            val updated = request.copy(
-                status = SendStatus.FAILED_FINAL,
-                updatedAt = System.currentTimeMillis(),
-                errorMessage = "No active sender available"
-            )
-            dao.update(updated)
-            sendAck(request.id, "FAILED", "No active sender available")
-            return
-        }
         val dao = sendRequestDao ?: run {
             Log.e(TAG, "SendRequestDao is null, cannot process request: id=${request.id}")
             return
         }
-
+        
         Log.i(TAG, "═══════════════════════════════════════════════════════")
         Log.i(TAG, "Processing send request:")
         Log.i(TAG, "  id: ${request.id}")
         Log.i(TAG, "  roomKey: \"${request.roomKey}\"")
         Log.i(TAG, "  textLength: ${request.text.length}")
         Log.i(TAG, "  text: ${request.text.take(100)}${if (request.text.length > 100) "..." else ""}")
-        Log.i(TAG, "  sender type: ${sender.javaClass.simpleName}")
-
-        try {
-            val result = sender.send(request.roomKey, request.text)
-            
-            Log.i(TAG, "Send result for id=${request.id}: ${result.javaClass.simpleName}")
-
-            when (result) {
-                is com.goodhabit.kakaobridge.sender.SendResult.Success -> {
-                    val updated = request.copy(
-                        status = SendStatus.SENT,
-                        updatedAt = System.currentTimeMillis()
-                    )
-                    dao.update(updated)
-                    sendAck(request.id, "SENT")
-                    Log.i(TAG, "✓ Message sent successfully: id=${request.id}, roomKey=${request.roomKey}")
-                }
-                is com.goodhabit.kakaobridge.sender.SendResult.WaitingNotification -> {
-                    val updated = request.copy(
-                        status = SendStatus.WAITING_NOTIFICATION,
-                        updatedAt = System.currentTimeMillis(),
-                        errorMessage = result.reason
-                    )
-                    dao.update(updated)
-                    sendAck(request.id, "WAITING_NOTIFICATION", result.reason)
-                    Log.d(TAG, "⏳ Waiting for notification: id=${request.id}, reason=${result.reason}")
-                }
-                is com.goodhabit.kakaobridge.sender.SendResult.FailedRetryable -> {
-                    val retryCount = request.retryCount + 1
-                    val nextRetryAt = result.retryAfterMs?.let {
-                        System.currentTimeMillis() + it
-                    } ?: calculateNextRetryTime(retryCount)
-
-                    val updated = request.copy(
-                        status = SendStatus.FAILED_RETRYABLE,
-                        retryCount = retryCount,
-                        nextRetryAt = nextRetryAt,
-                        updatedAt = System.currentTimeMillis(),
-                        errorMessage = result.reason
-                    )
-                    dao.update(updated)
-                    sendAck(request.id, "FAILED", result.reason)
-                    Log.w(TAG, "⚠ Failed (retryable): id=${request.id}, retryCount=$retryCount, reason=${result.reason}, nextRetryAt=$nextRetryAt")
-                }
-                is com.goodhabit.kakaobridge.sender.SendResult.FailedFinal -> {
-                    val updated = request.copy(
-                        status = SendStatus.FAILED_FINAL,
-                        updatedAt = System.currentTimeMillis(),
-                        errorMessage = result.reason
-                    )
-                    dao.update(updated)
-                    sendAck(request.id, "FAILED", result.reason)
-                    Log.e(TAG, "✗ Failed (final): id=${request.id}, reason=${result.reason}")
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Exception processing send request: id=${request.id}, error=${e.message}", e)
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        
+        // 1순위: RemoteInputSender 시도 (알림 리플라이)
+        val primarySender = remoteInputSender ?: run {
+            Log.e(TAG, "RemoteInputSender is null, cannot process request: id=${request.id}")
             val updated = request.copy(
-                status = SendStatus.FAILED_RETRYABLE,
-                retryCount = request.retryCount + 1,
-                nextRetryAt = calculateNextRetryTime(request.retryCount + 1),
+                status = SendStatus.FAILED_FINAL,
                 updatedAt = System.currentTimeMillis(),
-                errorMessage = e.message
+                errorMessage = "RemoteInputSender not initialized"
             )
             dao.update(updated)
-            sendAck(request.id, "FAILED", e.message ?: "Unknown error")
+            sendAck(request.id, "FAILED", "RemoteInputSender not initialized")
+            return
+        }
+        
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        Log.i(TAG, "Step 1: Trying RemoteInputSender (notification reply)")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        // RemoteInputSender는 이미지 전송을 지원하지 않으므로 text만 전달
+        val firstResult = trySend(primarySender, request.roomKey, request.text, null)
+        Log.i(TAG, "RemoteInputSender result: ${firstResult?.javaClass?.simpleName ?: "null"}")
+        
+        // RemoteInputSender가 성공하면 완료
+        if (firstResult is com.goodhabit.kakaobridge.sender.SendResult.Success) {
+            Log.i(TAG, "✓✓✓ RemoteInputSender succeeded - message sent via notification reply ✓✓✓")
+            handleSendResult(firstResult, request, dao)
+            return
+        }
+        
+        // WaitingNotification인 경우: 알림이 없음 → AccessibilitySender로 fallback
+        if (firstResult is com.goodhabit.kakaobridge.sender.SendResult.WaitingNotification) {
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
+            Log.i(TAG, "⚠ RemoteInputSender returned WaitingNotification: ${firstResult.reason}")
+            Log.i(TAG, "  → No notification available, falling back to AccessibilitySender")
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
+            
+            // 접근성 서비스 확인 및 초기화
+            val isAccessibilityEnabled = KakaoAutomationService.isServiceEnabled(this)
+            var automationService: KakaoAutomationService? = KakaoAutomationService.getInstance()
+            
+            // 인스턴스가 아직 연결되지 않았지만 설정에서 활성화되어 있으면 잠시 대기
+            if (isAccessibilityEnabled && automationService == null) {
+                Log.i(TAG, "AccessibilityService is enabled but not connected yet, waiting...")
+                repeat(3) {
+                    kotlinx.coroutines.delay(500)
+                    automationService = KakaoAutomationService.getInstance()
+                    if (automationService != null) {
+                        Log.i(TAG, "✓ AccessibilityService connected after wait")
+                        return@repeat
+                    }
+                }
+            }
+            
+            val connectedService = automationService
+            if (isAccessibilityEnabled && connectedService != null) {
+                // AccessibilitySender가 없으면 초기화
+                if (accessibilitySender == null) {
+                    accessibilitySender = AccessibilitySender(this, connectedService)
+                    Log.i(TAG, "✓ AccessibilitySender initialized during fallback")
+                }
+                
+                val fallbackSender = accessibilitySender
+                if (fallbackSender == null) {
+                    Log.e(TAG, "✗ AccessibilitySender is null even though service is available")
+                    Log.e(TAG, "  Handling RemoteInputSender result (WaitingNotification)")
+                    handleSendResult(firstResult, request, dao)
+                    return
+                }
+                
+                Log.i(TAG, "═══════════════════════════════════════════════════════")
+                Log.i(TAG, "🚀🚀🚀 FALLBACK: Using AccessibilitySender 🚀🚀🚀")
+                Log.i(TAG, "  Reason: No notification available for RemoteInput")
+                Log.i(TAG, "  This should send immediately via UI automation")
+                Log.i(TAG, "═══════════════════════════════════════════════════════")
+                
+                val fallbackResult = trySend(fallbackSender, request.roomKey, request.text, request.imageUrl)
+                Log.i(TAG, "AccessibilitySender result: ${fallbackResult?.javaClass?.simpleName ?: "null"}")
+                
+                if (fallbackResult is com.goodhabit.kakaobridge.sender.SendResult.Success) {
+                    Log.i(TAG, "✓✓✓✓✓ FALLBACK SUCCEEDED: AccessibilitySender sent message ✓✓✓✓✓")
+                    handleSendResult(fallbackResult, request, dao)
+                } else {
+                    Log.w(TAG, "⚠⚠⚠ FALLBACK FAILED: AccessibilitySender also failed ⚠⚠⚠")
+                    Log.w(TAG, "  Handling RemoteInputSender result (WaitingNotification)")
+                    handleSendResult(firstResult, request, dao)
+                }
+            } else {
+                Log.w(TAG, "═══════════════════════════════════════════════════════")
+                Log.w(TAG, "⚠ AccessibilityService NOT available for fallback")
+                Log.w(TAG, "  isServiceEnabled: $isAccessibilityEnabled")
+                Log.w(TAG, "  getInstance() != null: ${automationService != null}")
+                Log.w(TAG, "  → Cannot fallback, handling RemoteInputSender result (WaitingNotification)")
+                Log.w(TAG, "  → Message will be sent when notification arrives")
+                Log.w(TAG, "═══════════════════════════════════════════════════════")
+                handleSendResult(firstResult, request, dao)
+            }
+            return
+        }
+        
+        // 다른 실패 결과 (FailedRetryable, FailedFinal 등)
+        Log.w(TAG, "RemoteInputSender failed (not WaitingNotification), handling result")
+        handleSendResult(firstResult, request, dao)
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+    }
+    
+    /**
+     * 실제 전송 시도
+     */
+    private suspend fun trySend(
+        sender: MessageSender,
+        roomKey: String,
+        text: String,
+        imageUrl: String? = null
+    ): com.goodhabit.kakaobridge.sender.SendResult? {
+        return try {
+            // 모든 sender의 send() 메서드에 imageUrl 전달 (RemoteInputSender는 무시함)
+            sender.send(roomKey, text, imageUrl)
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception during send attempt: ${e.message}", e)
+            com.goodhabit.kakaobridge.sender.SendResult.FailedRetryable("Exception: ${e.message}")
+        }
+    }
+    
+    /**
+     * 전송 결과 처리
+     */
+    private suspend fun handleSendResult(
+        result: com.goodhabit.kakaobridge.sender.SendResult?,
+        request: SendRequest,
+        dao: SendRequestDao
+    ) {
+        if (result == null) {
+            Log.e(TAG, "Send result is null for request: id=${request.id}")
+            return
+        }
+
+        Log.i(TAG, "Send result for id=${request.id}: ${result.javaClass.simpleName}")
+
+        when (result) {
+            is com.goodhabit.kakaobridge.sender.SendResult.Success -> {
+                val updated = request.copy(
+                    status = SendStatus.SENT,
+                    updatedAt = System.currentTimeMillis()
+                )
+                dao.update(updated)
+                sendAck(request.id, "SENT")
+                Log.i(TAG, "✓ Message sent successfully: id=${request.id}, roomKey=${request.roomKey}")
+            }
+            is com.goodhabit.kakaobridge.sender.SendResult.WaitingNotification -> {
+                val updated = request.copy(
+                    status = SendStatus.WAITING_NOTIFICATION,
+                    updatedAt = System.currentTimeMillis(),
+                    errorMessage = result.reason
+                )
+                dao.update(updated)
+                sendAck(request.id, "WAITING_NOTIFICATION", result.reason)
+                Log.d(TAG, "⏳ Waiting for notification: id=${request.id}, reason=${result.reason}")
+            }
+            is com.goodhabit.kakaobridge.sender.SendResult.FailedRetryable -> {
+                val retryCount = request.retryCount + 1
+                val nextRetryAt = result.retryAfterMs?.let {
+                    System.currentTimeMillis() + it
+                } ?: calculateNextRetryTime(retryCount)
+
+                val updated = request.copy(
+                    status = SendStatus.FAILED_RETRYABLE,
+                    retryCount = retryCount,
+                    nextRetryAt = nextRetryAt,
+                    updatedAt = System.currentTimeMillis(),
+                    errorMessage = result.reason
+                )
+                dao.update(updated)
+                sendAck(request.id, "FAILED", result.reason)
+                Log.w(TAG, "⚠ Failed (retryable): id=${request.id}, retryCount=$retryCount, reason=${result.reason}, nextRetryAt=$nextRetryAt")
+            }
+            is com.goodhabit.kakaobridge.sender.SendResult.FailedFinal -> {
+                val updated = request.copy(
+                    status = SendStatus.FAILED_FINAL,
+                    updatedAt = System.currentTimeMillis(),
+                    errorMessage = result.reason
+                )
+                dao.update(updated)
+                sendAck(request.id, "FAILED", result.reason)
+                Log.e(TAG, "✗ Failed (final): id=${request.id}, reason=${result.reason}")
+            }
         }
     }
 
@@ -529,6 +764,9 @@ class BridgeForegroundService : Service() {
                 val cacheInfo = cache.getCacheInfo()
                 Log.d(TAG, "Cache status: ${cacheInfo["totalEntries"]} entries")
                 
+                // 이미지 캐시도 정리
+                com.goodhabit.kakaobridge.accessibility.util.ImageHelper.cleanupOldImages(this, maxAgeMs = 3600000) // 1시간
+                
                 delay(1800000) // 30분마다 실행
             } catch (e: Exception) {
                 Log.e(TAG, "Error during cache cleanup", e)
@@ -554,7 +792,20 @@ class BridgeForegroundService : Service() {
 
         val ackString = ack.toString()
         Log.d(TAG, "Sending ACK: $ackString")
-        webSocketClient?.send(ackString) ?: Log.w(TAG, "WebSocket client is null, cannot send ACK")
+        
+        val sent = webSocketClient?.send(ackString) ?: false
+        if (!sent) {
+            Log.w(TAG, "⚠ WebSocket client is null or not connected, cannot send ACK. Attempting to reconnect...")
+            // WebSocket이 연결되지 않았으면 재연결 시도
+            serviceScope.launch {
+                if (reconnectAttempts == 0) {
+                    Log.i(TAG, "Starting WebSocket reconnection...")
+                    startWebSocketConnection()
+                }
+            }
+        } else {
+            Log.d(TAG, "✓ ACK sent: id=$id, status=$status")
+        }
     }
 }
 

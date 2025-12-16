@@ -30,3 +30,5 @@ npm start
 2. Supabase Table Editor에서 테이블 생성 여부 확인
 3. Node.js 버전 확인 (18 이상 필요)
 
+
+

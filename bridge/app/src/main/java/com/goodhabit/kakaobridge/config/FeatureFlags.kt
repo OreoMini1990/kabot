@@ -17,9 +17,10 @@ object FeatureFlags {
     private const val KEY_ACCESSIBILITY_SEND_ENABLED = "accessibility_send_enabled"
     private const val KEY_REMOTE_INPUT_SEND_ENABLED = "remote_input_send_enabled"
     
-    // 기본값: 기존 방식(RemoteInputSender) 활성화, 새로운 방식 비활성화
-    private const val DEFAULT_ACCESSIBILITY_ENABLED = false
-    private const val DEFAULT_REMOTE_INPUT_ENABLED = true
+    // 기본값: 접근성만 사용 (알림 리플라이 비활성화)
+    // 접근성 서비스가 활성화되면 접근성만 사용
+    private const val DEFAULT_ACCESSIBILITY_ENABLED = true
+    private const val DEFAULT_REMOTE_INPUT_ENABLED = false
     
     /**
      * 접근성 기반 전송 활성화 여부
@@ -55,6 +56,8 @@ object FeatureFlags {
     
     /**
      * 현재 활성화된 전송 방식 반환
+     * 
+     * 둘 다 활성화되어 있으면 접근성 방식 우선 (더 직접적이고 안정적)
      */
     fun getActiveSendMethod(context: Context): SendMethod {
         return when {
@@ -62,6 +65,13 @@ object FeatureFlags {
             isRemoteInputSendEnabled(context) -> SendMethod.REMOTE_INPUT
             else -> SendMethod.REMOTE_INPUT // 기본값
         }
+    }
+    
+    /**
+     * 하이브리드 모드 여부 (둘 다 활성화되어 있으면 true)
+     */
+    fun isHybridMode(context: Context): Boolean {
+        return isAccessibilitySendEnabled(context) && isRemoteInputSendEnabled(context)
     }
     
     private fun getPrefs(context: Context): SharedPreferences {

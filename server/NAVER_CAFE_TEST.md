@@ -161,3 +161,5 @@ https://your-domain.com/go/{shortCode}
 3. 권한 없을 때 DB 저장 확인
 4. 관리자 페이지에서 저장된 질문 조회 (추후 구현 가능)
 
+
+

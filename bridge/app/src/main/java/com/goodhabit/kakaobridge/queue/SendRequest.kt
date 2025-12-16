@@ -31,6 +31,7 @@ data class SendRequest(
     val nextRetryAt: Long? = null,      // 다음 재시도 시각 (timestamp)
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
-    val errorMessage: String? = null    // 오류 메시지 (실패 시)
+    val errorMessage: String? = null,   // 오류 메시지 (실패 시)
+    val imageUrl: String? = null        // 이미지 URL (선택사항)
 )
 

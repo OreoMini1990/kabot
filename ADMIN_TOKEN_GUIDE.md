@@ -45,3 +45,5 @@ ADMIN_TOKEN=your-secure-token-here
 pm2 restart kakkaobot-server
 ```
 
+
+

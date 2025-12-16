@@ -25,17 +25,47 @@ class BridgeWebSocketClient(
 
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            Log.i(TAG, "✓✓✓ WebSocket OPENED: $url")
-            Log.d(TAG, "Response: ${response.code} ${response.message}")
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
+            Log.i(TAG, "✓✓✓✓✓ WebSocket OPENED ✓✓✓✓✓")
+            Log.i(TAG, "  URL: $url")
+            Log.i(TAG, "  Response: ${response.code} ${response.message}")
+            Log.i(TAG, "  Headers: ${response.headers}")
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
             this@BridgeWebSocketClient.webSocket = webSocket
+            
+            // 서버에 Bridge APK 식별 메시지 전송
+            try {
+                val identifyMessage = org.json.JSONObject().apply {
+                    put("type", "bridge_connect")
+                    put("client", "bridge_apk")
+                }
+                val sent = webSocket.send(identifyMessage.toString())
+                if (sent) {
+                    Log.i(TAG, "✓ Bridge APK 식별 메시지 전송 성공: type=bridge_connect")
+                } else {
+                    Log.w(TAG, "⚠ Bridge APK 식별 메시지 전송 실패")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "✗ Bridge APK 식별 메시지 전송 중 오류", e)
+            }
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            Log.i(TAG, "✓✓✓ WebSocket MESSAGE RECEIVED: ${text.take(200)}${if (text.length > 200) "..." else ""}")
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
+            Log.i(TAG, "✓✓✓✓✓ WebSocket MESSAGE RECEIVED ✓✓✓✓✓")
+            Log.i(TAG, "  Message length: ${text.length}")
+            Log.i(TAG, "  Message preview: ${text.take(200)}${if (text.length > 200) "..." else ""}")
+            Log.i(TAG, "  Calling onMessage callback...")
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
             try {
                 onMessage(text)
+                Log.i(TAG, "✓ onMessage callback completed successfully")
             } catch (e: Exception) {
-                Log.e(TAG, "Error in onMessage callback", e)
+                Log.e(TAG, "═══════════════════════════════════════════════════════")
+                Log.e(TAG, "✗✗✗ Error in onMessage callback ✗✗✗")
+                Log.e(TAG, "  오류: ${e.message}")
+                Log.e(TAG, "  스택 트레이스:", e)
+                Log.e(TAG, "═══════════════════════════════════════════════════════")
             }
         }
 
@@ -72,8 +102,12 @@ class BridgeWebSocketClient(
      * WebSocket 연결
      */
     fun connect() {
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        Log.i(TAG, "🔌🔌🔌 WebSocket connect() 호출됨 🔌🔌🔌")
+        Log.i(TAG, "  URL: $url")
+        
         if (webSocket != null) {
-            Log.w(TAG, "WebSocket already connected")
+            Log.w(TAG, "⚠ WebSocket already connected, skipping")
             return
         }
 
@@ -81,7 +115,14 @@ class BridgeWebSocketClient(
             .url(url)
             .build()
 
+        Log.i(TAG, "  Request URL: ${request.url}")
+        Log.i(TAG, "  Calling client.newWebSocket()...")
+        
         webSocket = client.newWebSocket(request, listener)
+        
+        Log.i(TAG, "  ✓ client.newWebSocket() called")
+        Log.i(TAG, "  webSocket != null: ${webSocket != null}")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
     }
 
     /**

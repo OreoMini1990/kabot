@@ -78,3 +78,5 @@ npm start
 - 복잡한 SQL 쿼리는 지원하지 않을 수 있습니다. 간단한 SELECT, INSERT, UPDATE, DELETE만 지원합니다.
 - WHERE 절의 복잡한 조건은 지원하지 않을 수 있습니다.
 
+
+

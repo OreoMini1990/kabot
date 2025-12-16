@@ -731,6 +731,56 @@ app.get('/sync/file/:filename', (req, res) => {
   }
 });
 
+// 이미지 파일 제공 엔드포인트
+app.get('/api/image/:filename', (req, res) => {
+  const filename = req.params.filename;
+  const IMAGE_DIR = '/home/app/iris-core/admin/data/img';
+  
+  // 보안: 파일명에 경로 탐색 문자 제거
+  const safeFilename = path.basename(filename);
+  const filePath = path.join(IMAGE_DIR, safeFilename);
+  
+  if (!fs.existsSync(filePath)) {
+    console.error(`[이미지] 파일 없음: ${filePath}`);
+    res.status(404).json({ 
+      ok: false, 
+      error: 'Image not found',
+      filename: safeFilename
+    });
+    return;
+  }
+  
+  try {
+    // MIME 타입 결정
+    const ext = path.extname(safeFilename).toLowerCase();
+    const mimeTypes = {
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.png': 'image/png',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp'
+    };
+    const contentType = mimeTypes[ext] || 'image/jpeg';
+    
+    // 이미지 파일 읽기 (바이너리)
+    const imageBuffer = fs.readFileSync(filePath);
+    
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${safeFilename}"`);
+    res.setHeader('Cache-Control', 'public, max-age=3600'); // 1시간 캐시
+    res.send(imageBuffer);
+    
+    console.log(`[이미지] 제공 완료: ${safeFilename} (${imageBuffer.length} bytes)`);
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] 이미지 제공 오류:`, error);
+    res.status(500).json({ 
+      ok: false, 
+      error: 'Image read error',
+      message: error.message
+    });
+  }
+});
+
 // WebSocket 브로드캐스트 유틸 함수 (중복 제거)
 // irispy-client는 {msg, room, sender, json: {...}} 형식을 기대함
 // irispy-client 소스 코드 93-94줄: data["raw"] = data.get("json"); del data["json"];
@@ -1067,8 +1117,32 @@ wss.on('connection', function connection(ws, req) {
       }
 
       // 1️⃣ IrisLink connect 타입 처리
+      // ACK 메시지는 무시 (Bridge APK에서 전송 상태 알림)
+      if (messageData.type === 'ack') {
+        console.log(`[ACK 수신] Bridge APK에서 ACK 수신: id=${messageData.id}, status=${messageData.status}`);
+        return; // ACK는 처리하지 않고 무시
+      }
+      
+      // Bridge APK 식별 메시지 처리
+      if (messageData.type === 'bridge_connect') {
+        console.log(`[${new Date().toISOString()}] ═══════════════════════════════════════════════════════`);
+        console.log(`[${new Date().toISOString()}] ✓✓✓ Bridge APK 클라이언트 연결 확인 ✓✓✓`);
+        console.log(`[${new Date().toISOString()}]   client: ${messageData.client || 'unknown'}`);
+        // 클라이언트에 Bridge APK 플래그 설정
+        ws.isBridge = true;
+        console.log(`[${new Date().toISOString()}]   ws.isBridge = true 설정 완료`);
+        console.log(`[${new Date().toISOString()}] ═══════════════════════════════════════════════════════`);
+        ws.send(JSON.stringify({
+          type: 'bridge_connected',
+          ok: true
+        }));
+        return;
+      }
+      
       if (messageData.type === 'connect') {
         console.log(`[${new Date().toISOString()}] Iris client handshake OK`);
+        // Iris 클라이언트는 Bridge APK가 아님
+        ws.isBridge = false;
         ws.send(JSON.stringify({
           type: 'connected',
           ok: true
@@ -1469,13 +1543,29 @@ wss.on('connection', function connection(ws, req) {
           isGroupChat: isGroupChat !== undefined ? isGroupChat : true
         });
 
+        console.log(`[${new Date().toISOString()}] ═══════════════════════════════════════════════════════`);
+        console.log(`[${new Date().toISOString()}] handleMessage 호출 전:`);
+        console.log(`  room: "${decryptedRoomName || ''}"`);
+        console.log(`  msg: "${(decryptedMessage || '').substring(0, 100)}"`);
+        console.log(`  sender: "${senderName || sender || ''}"`);
+        console.log(`  isGroupChat: ${isGroupChat !== undefined ? isGroupChat : true}`);
+        
         const replies = await handleMessage(
           decryptedRoomName || '',
           decryptedMessage || '',
           senderName || sender || '',  // 닉네임 우선, 없으면 원본 sender 사용
           isGroupChat !== undefined ? isGroupChat : true
         );
-
+        
+        console.log(`[${new Date().toISOString()}] handleMessage 호출 후:`);
+        console.log(`  replies.length: ${replies.length}`);
+        if (replies.length > 0) {
+          console.log(`  replies[0]: ${JSON.stringify(replies[0]).substring(0, 200)}...`);
+        } else {
+          console.log(`  ⚠⚠⚠ replies가 비어있습니다! ⚠⚠⚠`);
+        }
+        console.log(`[${new Date().toISOString()}] ═══════════════════════════════════════════════════════`);
+        
         // chat_id 추출 (클라이언트에서 숫자로 변환 가능하도록)
         // json.chat_id가 있으면 사용 (클라이언트에서 명시적으로 전송한 값)
         let chatId = json?.chat_id;
@@ -1545,7 +1635,12 @@ wss.on('connection', function connection(ws, req) {
         }
         
         if (replies.length === 0) {
-          console.log(`[응답 생성] 빈 응답 배열, 전송하지 않음`);
+          console.log(`[응답 생성] ⚠⚠⚠ 빈 응답 배열, 전송하지 않음 ⚠⚠⚠`);
+          console.log(`[응답 생성] 디버깅 정보:`);
+          console.log(`  - decryptedMessage: "${decryptedMessage?.substring(0, 100)}"`);
+          console.log(`  - decryptedRoomName: "${decryptedRoomName}"`);
+          console.log(`  - senderName: "${senderName}"`);
+          console.log(`  - isGroupChat: ${isGroupChat}`);
           ws.send(JSON.stringify({
             type: 'reply',
             replies: []
@@ -1553,21 +1648,43 @@ wss.on('connection', function connection(ws, req) {
           return;
         }
 
+        console.log(`[응답 생성] ✓ replies.length=${replies.length}, 응답 전송 시작`);
+
         // 기존 클라이언트용 reply 형식 전송
-        ws.send(JSON.stringify({
-          type: 'reply',
-          replies: replies.map(text => ({
+        const replyMessages = replies.map(reply => {
+          // reply가 객체이고 imageUrl이 있으면 이미지 응답
+          if (typeof reply === 'object' && reply !== null && reply.imageUrl) {
+            console.log(`[응답 생성] 이미지 응답 감지: imageUrl="${reply.imageUrl}"`);
+            return {
+              type: 'image',
+              text: reply.text || '📷',
+              imageUrl: reply.imageUrl,
+              room: decryptedRoomName,
+              chat_id: chatId
+            };
+          }
+          // 일반 텍스트 응답
+          return {
             type: 'text',
-            text: text,
+            text: typeof reply === 'string' ? reply : (reply.text || String(reply)),
             room: decryptedRoomName,  // 복호화된 채팅방 이름
             chat_id: chatId  // 숫자 chat_id 추가 (클라이언트에서 사용)
-          }))
+          };
+        });
+        
+        console.log(`[응답 생성] replyMessages 개수: ${replyMessages.length}`);
+        ws.send(JSON.stringify({
+          type: 'reply',
+          replies: replyMessages
         }));
         
         // Bridge APK용 send 형식으로도 전송 (사용자가 보낸 메시지의 원본 room 값 사용)
         // Bridge APK가 알림에서 추출한 roomKey와 정확히 일치해야 함
         // 중요: decryptedRoomName이 아닌 원본 room 값을 사용 (Bridge APK는 알림에서 채팅방명을 추출)
+        console.log(`[응답 생성] ═══════════════════════════════════════════════════════`);
+        console.log(`[응답 생성] replies.length=${replies.length}`);
         if (replies.length > 0) {
+          console.log(`[응답 생성] ✓ replies가 있음, Bridge APK로 전송 시작`);
           // Bridge APK가 알림에서 추출하는 roomKey는 채팅방명이므로, 원본 room 값을 우선 사용
           // decryptedRoomName은 복호화된 이름이므로 Bridge APK가 알림에서 추출한 값과 다를 수 있음
           const actualRoomKey = room || CONFIG.ROOM_KEY || '';
@@ -1575,42 +1692,103 @@ wss.on('connection', function connection(ws, req) {
           console.log(`[Bridge 전송] roomKey 결정: room="${room}" (원본), decryptedRoomName="${decryptedRoomName}" (복호화), 최종="${actualRoomKey}"`);
           console.log(`[Bridge 전송] 중요: Bridge APK는 알림에서 채팅방명을 추출하므로 원본 room 값 사용`);
           
-          // Bridge APK 클라이언트 찾기 (현재 클라이언트 제외)
+          // Bridge APK 클라이언트 찾기
+          // 중요: ws.isBridge 플래그를 사용하여 정확히 Bridge APK 클라이언트만 찾기
           const bridgeClients = [];
           if (wss && wss.clients) {
+            console.log(`[Bridge 전송] 전체 WebSocket 클라이언트 수: ${wss.clients.size}`);
             for (const client of wss.clients) {
-              if (client !== ws && client.readyState === WebSocket.OPEN) {
-                bridgeClients.push(client);
+              if (client.readyState === WebSocket.OPEN) {
+                // ws.isBridge 플래그로 Bridge APK 클라이언트 식별
+                if (client.isBridge === true) {
+                  bridgeClients.push(client);
+                  console.log(`[Bridge 전송] ✓ Bridge APK 클라이언트 발견 (isBridge=true)`);
+                } else if (client === ws) {
+                  console.log(`[Bridge 전송] 현재 클라이언트는 Iris 클라이언트이므로 제외 (isBridge=${client.isBridge})`);
+                } else {
+                  console.log(`[Bridge 전송] 클라이언트는 Bridge APK가 아님 (isBridge=${client.isBridge})`);
+                }
+              } else {
+                console.log(`[Bridge 전송] 클라이언트 상태: ${client.readyState} (OPEN=1)`);
               }
             }
           }
+          console.log(`[Bridge 전송] Bridge APK 클라이언트 수: ${bridgeClients.length}`);
           
           // Bridge APK에 즉시 전송 (사용자가 메시지를 보낼 때 알림이 발생하므로 roomKey가 이미 캐시됨)
           // 지연 없이 즉시 전송하여 빠른 응답 제공
           let sentCount = 0;
           for (let i = 0; i < replies.length; i++) {
+            const reply = replies[i];
+            
+            // reply가 객체이고 imageUrl이 있으면 이미지 전송
+            let text = '';
+            let imageUrl = null;
+            
+            // 디버깅: reply 객체 구조 확인
+            if (typeof reply === 'object' && reply !== null) {
+              console.log(`[Bridge 전송] reply 객체 확인: type=${reply.type}, imageUrl=${reply.imageUrl ? '있음' : '없음'}, text="${reply.text || ''}"`);
+            }
+            
+            if (typeof reply === 'object' && reply !== null && reply.imageUrl) {
+              text = reply.text || '📷';
+              imageUrl = reply.imageUrl;
+              console.log(`[Bridge 전송] 이미지 포함: imageUrl="${imageUrl}", text="${text}"`);
+            } else {
+              text = typeof reply === 'string' ? reply : (reply.text || String(reply));
+            }
+            
             const sendMessage = {
               type: 'send',
               id: `reply-${Date.now()}-${i}`,
               roomKey: actualRoomKey, // 원본 room 값 사용 (Bridge APK가 알림에서 추출한 값과 일치)
-              text: replies[i],
+              text: text,
               ts: Math.floor(Date.now() / 1000)
             };
-            const messageStr = JSON.stringify(sendMessage);
             
-            // 첫 번째 Bridge APK에게 즉시 전송
-            if (bridgeClients.length > 0) {
-              try {
-                bridgeClients[0].send(messageStr);
-                sentCount++;
-              } catch (err) {
-                console.error(`[Bridge 전송] 클라이언트 전송 실패:`, err.message);
-              }
+            // imageUrl이 있으면 반드시 추가 (이미지만 전송할 수도 있음)
+            if (imageUrl) {
+              sendMessage.imageUrl = imageUrl;
+              console.log(`[Bridge 전송] imageUrl 필드 추가됨: "${imageUrl}"`);
             }
+            
+            const messageStr = JSON.stringify(sendMessage);
+            console.log(`[Bridge 전송] 전송할 메시지: ${messageStr.substring(0, 200)}...`);
+            
+          // 첫 번째 Bridge APK에게 즉시 전송
+          console.log(`[Bridge 전송] ═══════════════════════════════════════════════════════`);
+          console.log(`[Bridge 전송] 전송 시도: replies[${i}], bridgeClients.length=${bridgeClients.length}`);
+          console.log(`[Bridge 전송] 메시지 내용: ${messageStr.substring(0, 200)}...`);
+          
+          if (bridgeClients.length > 0) {
+            try {
+              bridgeClients[0].send(messageStr);
+              sentCount++;
+              console.log(`[Bridge 전송] ✓✓✓ 메시지 전송 성공 ✓✓✓`);
+              console.log(`[Bridge 전송]   id=${sendMessage.id}`);
+              console.log(`[Bridge 전송]   roomKey="${sendMessage.roomKey}"`);
+              console.log(`[Bridge 전송]   text="${sendMessage.text?.substring(0, 50)}..."`);
+              console.log(`[Bridge 전송]   imageUrl=${imageUrl ? `"${imageUrl}"` : '없음'}`);
+            } catch (err) {
+              console.error(`[Bridge 전송] ✗✗✗ 클라이언트 전송 실패 ✗✗✗`);
+              console.error(`[Bridge 전송]   오류: ${err.message}`);
+              console.error(`[Bridge 전송]   스택: ${err.stack}`);
+            }
+          } else {
+            console.error(`[Bridge 전송] ✗✗✗ Bridge APK 클라이언트가 연결되어 있지 않음 ✗✗✗`);
+            console.error(`[Bridge 전송]   전체 WebSocket 클라이언트 수: ${wss?.clients?.size || 0}`);
+            console.error(`[Bridge 전송]   현재 클라이언트 제외 후: ${bridgeClients.length}개`);
+            console.error(`[Bridge 전송]   현재 클라이언트(ws)는 Iris 클라이언트이므로 제외됨`);
+          }
+          console.log(`[Bridge 전송] ═══════════════════════════════════════════════════════`);
           }
           
           console.log(`[Bridge 전송] 응답 ${replies.length}개 즉시 전송 완료: roomKey="${actualRoomKey}", Bridge APK 전송=${sentCount}개`);
+        } else {
+          console.warn(`[응답 생성] ⚠⚠⚠ replies가 비어있음! Bridge APK로 전송하지 않음 ⚠⚠⚠`);
+          console.warn(`[응답 생성] 명령어가 매칭되지 않았거나 handleMessage가 빈 배열을 반환했습니다.`);
         }
+        console.log(`[응답 생성] ═══════════════════════════════════════════════════════`);
         
         console.log(`[응답 전송] ${replies.length}개 응답 전송 완료, chat_id: ${chatId}`);
         return;
@@ -1667,15 +1845,17 @@ wss.on('connection', function connection(ws, req) {
         console.log(`[Bridge 전송] roomKey 결정: room="${room}" (원본), 최종="${actualRoomKey}"`);
         console.log(`[Bridge 전송] 중요: Bridge APK는 알림에서 채팅방명을 추출하므로 원본 room 값 사용`);
         
-        // Bridge APK 클라이언트 찾기 (현재 클라이언트 제외)
+        // Bridge APK 클라이언트 찾기 (ws.isBridge 플래그 사용)
         const bridgeClients = [];
         if (wss && wss.clients) {
           for (const client of wss.clients) {
-            if (client !== ws && client.readyState === WebSocket.OPEN) {
+            if (client.readyState === WebSocket.OPEN && client.isBridge === true) {
               bridgeClients.push(client);
+              console.log(`[Bridge 전송] ✓ Bridge APK 클라이언트 발견 (isBridge=true)`);
             }
           }
         }
+        console.log(`[Bridge 전송] Bridge APK 클라이언트 수: ${bridgeClients.length}`);
         
           // Bridge APK에 즉시 전송 (사용자가 메시지를 보낼 때 알림이 발생하므로 roomKey가 이미 캐시됨)
           // 지연 없이 즉시 전송하여 빠른 응답 제공

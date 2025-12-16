@@ -12,9 +12,10 @@ interface MessageSender {
      * 
      * @param roomKey 채팅방 식별자
      * @param text 전송할 메시지 텍스트
+     * @param imageUrl 이미지 URL (선택사항, 접근성 서비스에서만 지원)
      * @return 전송 결과
      */
-    suspend fun send(roomKey: String, text: String): SendResult
+    suspend fun send(roomKey: String, text: String, imageUrl: String? = null): SendResult
 }
 
 /**

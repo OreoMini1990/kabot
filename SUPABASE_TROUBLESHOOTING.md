@@ -108,3 +108,5 @@ supabase.from('profanity_words').select('*').limit(1).then(({data, error}) => {
 3. **관리자 페이지에서 토큰 입력**
    - `default-admin-token-change-me`
 
+
+

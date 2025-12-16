@@ -98,3 +98,5 @@ CREATE INDEX IF NOT EXISTS idx_naver_cafe_posts_sender ON naver_cafe_posts(kakao
 CREATE INDEX IF NOT EXISTS idx_naver_cafe_posts_created_at ON naver_cafe_posts(created_at);
 */
 
+
+

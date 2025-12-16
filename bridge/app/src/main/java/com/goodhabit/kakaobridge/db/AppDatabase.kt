@@ -10,7 +10,7 @@ import com.goodhabit.kakaobridge.queue.SendRequestDao
 
 @Database(
     entities = [SendRequest::class],
-    version = 1,
+    version = 2,  // imageUrl 필드 추가로 버전 증가
     exportSchema = false
 )
 @TypeConverters(Converters::class)

@@ -167,3 +167,5 @@ pm2 start config/ecosystem.config.js
 
 **먼저 `pm2 logs kakkaobot-server --err --lines 50` 명령어로 오류 메시지를 확인하고 알려주세요!**
 
+
+

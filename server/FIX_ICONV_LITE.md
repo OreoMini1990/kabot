@@ -91,3 +91,5 @@ iconv-lite@0.7.1
 - **package.json에 있어도 실제 설치 필요**: package.json에 있더라도 `npm install`을 실행해야 `node_modules`에 설치됩니다.
 - **PM2 재시작 필수**: 패키지 설치 후 반드시 `pm2 restart kakkaobot-server` 실행
 
+
+

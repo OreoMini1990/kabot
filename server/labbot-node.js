@@ -816,6 +816,7 @@ async function handleMessage(room, msg, sender, isGroupChat) {
     const trimmedMsg = msg.trim();
     const msgLower = trimmedMsg.toLowerCase();
     console.log(`[handleMessage] 명령어 체크: trimmedMsg="${trimmedMsg}", msgLower="${msgLower}"`);
+    console.log(`[handleMessage] !이미지 체크: startsWith("!이미지")=${msgLower.startsWith("!이미지")}, startsWith("!image")=${msgLower.startsWith("!image")}`);
     
     // ========== 네이버 카페 질문 기능 (우선순위 높음) ==========
     // !질문을 !hi보다 먼저 체크하여 !질문이 !hi로 매칭되지 않도록 함
@@ -917,10 +918,10 @@ async function handleMessage(room, msg, sender, isGroupChat) {
             const finalHeadid = (headid !== null && headid !== undefined && !isNaN(headid)) ? headid : null;
             console.log(`[네이버 카페] headid 최종값: ${finalHeadid} (원본: ${headidStr}, 파싱: ${headid})`);
             
-            // 네이버 카페 API 호출을 동기적으로 처리하여 결과를 즉시 응답으로 반환
-            // 사용자가 보낸 메시지에는 알림이 없으므로, "처리 중" 메시지를 보내도 전송되지 않음
-            // 따라서 API 호출 완료 후 결과를 바로 반환하고, 다른 사용자가 메시지를 보낼 때 알림이 발생하면 그때 전송됨
+            // 네이버 카페 API 호출을 동기적으로 처리하여 완료 후 즉시 응답 반환
+            // Bridge APK가 접근성 fallback을 사용하여 알림 없이도 즉시 전송 가능
             console.log(`[네이버 카페] 질문 처리 시작: title="${title}", content="${content.substring(0, 30)}..."`);
+            console.log(`[네이버 카페] API 호출 대기 중... (접근성 fallback으로 즉시 전송 예정)`);
             
             try {
                 const result = await submitQuestion({
@@ -965,9 +966,10 @@ async function handleMessage(room, msg, sender, isGroupChat) {
                 replies.push(`❌ 질문 처리 중 오류가 발생했습니다.\n오류: ${error.message}\n\n관리자에게 문의해주세요.`);
             }
             
-            // API 호출 완료 후 결과 반환
-            // 사용자가 보낸 메시지에는 알림이 없으므로, Bridge APK가 WAITING_NOTIFICATION 상태로 대기
-            // 다른 사용자가 메시지를 보낼 때 알림이 발생하면 그때 전송됨
+            // API 호출 완료 후 즉시 응답 반환
+            // Bridge APK가 받아서 처리할 때, RemoteInput이 WaitingNotification을 반환하면
+            // 하이브리드 모드에서 접근성 방식으로 자동 fallback하여 즉시 전송됨
+            console.log(`[네이버 카페] 응답 반환: replies.length=${replies.length}`);
             return replies;
             
         } catch (error) {
@@ -979,11 +981,111 @@ async function handleMessage(room, msg, sender, isGroupChat) {
         }
     }
     
-    // ========== "!hi" 명령어 (네이버 카페 질문 이후 체크) ==========
+    // ========== "!뉴스" 명령어 ==========
+    if (msgLower.startsWith("!뉴스") || msgLower.startsWith("!news")) {
+        console.log('[handleMessage] !뉴스 명령어 처리');
+        
+        try {
+            const naverNews = require('./integrations/naverSearch/naverNews');
+            const clientId = process.env.NAVER_CLIENT_ID;
+            const clientSecret = process.env.NAVER_CLIENT_SECRET;
+            
+            if (!clientId || !clientSecret) {
+                replies.push("❌ 네이버 검색 API 인증 정보가 설정되지 않았습니다.\n관리자에게 문의해주세요.");
+                return replies;
+            }
+            
+            // 검색어 추출 (!뉴스 뒤의 텍스트)
+            let searchQuery = '오늘 뉴스'; // 기본값
+            if (msgLower.startsWith("!뉴스 ")) {
+                searchQuery = trimmedMsg.substring(4).trim(); // "!뉴스 " 제거
+            } else if (msgLower.startsWith("!news ")) {
+                searchQuery = trimmedMsg.substring(6).trim(); // "!news " 제거
+            }
+            if (!searchQuery) {
+                searchQuery = '오늘 뉴스'; // 빈 문자열이면 기본값
+            }
+            
+            console.log(`[!뉴스] 검색어: "${searchQuery}"`);
+            
+            const newsResult = await naverNews.searchTodayNews(clientId, clientSecret, searchQuery, 5);
+            
+            if (newsResult && newsResult.success) {
+                const newsText = `📰 최신 뉴스: ${searchQuery}\n──────────\n${newsResult.title}\n${newsResult.description}\n\n링크: ${newsResult.link}`;
+                replies.push(newsText);
+                console.log(`[!뉴스] 응답 추가 완료: replies.length=${replies.length}`);
+            } else {
+                const errorMsg = newsResult?.message || '알 수 없는 오류';
+                replies.push(`❌ 뉴스를 가져오는 중 오류가 발생했습니다.\n${errorMsg}`);
+                console.log(`[!뉴스] 오류 응답 추가: replies.length=${replies.length}`);
+            }
+            
+            console.log(`[!뉴스] 함수 종료: replies.length=${replies.length}`);
+            return replies;
+        } catch (error) {
+            console.error('[!뉴스] 오류:', error);
+            replies.push("❌ 뉴스 조회 중 오류가 발생했습니다.\n오류: " + error.message);
+            return replies;
+        }
+    }
+    
+    // ========== "!이미지" 명령어 ==========
+    if (msgLower.startsWith("!이미지") || msgLower.startsWith("!image")) {
+        console.log('[handleMessage] !이미지 명령어 처리');
+        
+        try {
+            const imageFilename = 'catch.JPG';
+            const imagePath = path.join('/home/app/iris-core/admin/data/img', imageFilename);
+            
+            // 이미지 파일 존재 확인
+            if (!fs.existsSync(imagePath)) {
+                replies.push("❌ 이미지 파일을 찾을 수 없습니다.\n파일 경로: " + imagePath);
+                return replies;
+            }
+            
+            // 서버 URL 구성
+            let serverUrl = process.env.SERVER_URL || process.env.PUBLIC_BASE_URL || 'http://211.218.42.222:5002';
+            if (!serverUrl.startsWith('http://') && !serverUrl.startsWith('https://')) {
+                serverUrl = `http://${serverUrl}`;
+            }
+            
+            // 이미지 URL 생성 (정적 파일 서빙 경로 사용: /admin/data/img/)
+            const imageUrl = `${serverUrl}/admin/data/img/${imageFilename}`;
+            
+            console.log(`[!이미지] 이미지 파일 확인: ${imagePath}`);
+            console.log(`[!이미지] 이미지 URL 생성: ${imageUrl}`);
+            
+            // 특별한 형식으로 응답 (서버에서 imageUrl 필드로 처리)
+            // replies 배열에 특수 객체를 넣어서 서버에서 imageUrl로 변환
+            console.log(`[!이미지] replies 배열에 이미지 객체 추가: imageUrl="${imageUrl}"`);
+            replies.push({
+                type: 'image',
+                text: '📷', // 최소한의 텍스트 (빈 문자열 방지)
+                imageUrl: imageUrl
+            });
+            
+            console.log(`[!이미지] replies.length=${replies.length}, replies[0]=${JSON.stringify(replies[0])}`);
+            console.log(`[!이미지] 함수 종료: replies.length=${replies.length}, imageUrl="${imageUrl}"`);
+            return replies;
+        } catch (error) {
+            console.error('[!이미지] 오류:', error);
+            replies.push("❌ 이미지 전송 중 오류가 발생했습니다.\n오류: " + error.message);
+            return replies;
+        }
+    }
+    
+    // ========== "!hi" 명령어 ==========
     if (msgLower.startsWith("!hi")) {
         console.log('[handleMessage] !hi 명령어 처리');
         replies.push("helloworld");
+        console.log(`[handleMessage] !hi 응답 추가: replies.length=${replies.length}`);
         return replies;
+    }
+    
+    // 명령어가 매칭되지 않은 경우 로그
+    if (trimmedMsg.startsWith("!")) {
+        console.log(`[handleMessage] ⚠ 알 수 없는 명령어: "${trimmedMsg}"`);
+        console.log(`[handleMessage] 명령어 체크 완료, replies.length=${replies.length}`);
     }
     
     // 비속어 필터 통과 후 명령어 처리 계속 진행 (아래 코드 실행)
@@ -1781,6 +1883,16 @@ async function handleMessage(room, msg, sender, isGroupChat) {
         return replies;
     }
 
+    // 함수 끝에서 replies 상태 확인
+    console.log(`[handleMessage] 함수 종료: replies.length=${replies.length}`);
+    if (replies.length > 0) {
+        console.log(`[handleMessage] replies 내용: ${JSON.stringify(replies).substring(0, 200)}...`);
+    } else {
+        console.log(`[handleMessage] ⚠⚠⚠ 빈 replies 배열 반환 ⚠⚠⚠`);
+        console.log(`[handleMessage] 명령어가 매칭되지 않았거나 처리되지 않았습니다.`);
+        console.log(`[handleMessage] msgLower="${msgLower}", trimmedMsg="${trimmedMsg}"`);
+    }
+    
     return replies;
 }
 

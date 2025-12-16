@@ -24,22 +24,33 @@ class AccessibilitySender(
         private const val TAG = "AccessibilitySender"
     }
     
-    override suspend fun send(roomKey: String, text: String): SendResult {
+    override suspend fun send(roomKey: String, text: String, imageUrl: String?): SendResult {
         Log.i(TAG, "═══════════════════════════════════════════════════════")
         Log.i(TAG, "AccessibilitySender.send() called")
         Log.i(TAG, "  roomKey: \"$roomKey\"")
         Log.i(TAG, "  text: ${text.take(100)}${if (text.length > 100) "..." else ""}")
         Log.i(TAG, "  textLength: ${text.length}")
+        Log.i(TAG, "  imageUrl: ${imageUrl ?: "N/A"}")
         
         // 접근성 서비스가 활성화되어 있는지 확인
-        if (!automationService.isServiceEnabled()) {
-            Log.w(TAG, "✗ AccessibilityService is not enabled")
+        val isEnabled = automationService.isServiceEnabled()
+        Log.i(TAG, "AccessibilityService enabled check: $isEnabled")
+        Log.i(TAG, "KakaoAutomationService.getInstance(): ${KakaoAutomationService.getInstance() != null}")
+        
+        if (!isEnabled) {
+            Log.e(TAG, "═══════════════════════════════════════════════════════")
+            Log.e(TAG, "✗✗✗ AccessibilityService is NOT enabled ✗✗✗")
+            Log.e(TAG, "Please enable: Settings > Accessibility > Installed services > KakaoBridge")
+            Log.e(TAG, "This should NOT happen if accessibility-only mode is active")
+            Log.e(TAG, "═══════════════════════════════════════════════════════")
             return SendResult.FailedFinal("접근성 서비스가 활성화되지 않았습니다. 설정 > 접근성에서 활성화해주세요.")
         }
         
+        Log.i(TAG, "✓ AccessibilityService is enabled, proceeding with send")
+        
         // 자동화 작업 큐에 추가
         return try {
-            val result = automationService.sendMessage(roomKey, text)
+            val result = automationService.sendMessage(roomKey, text, imageUrl)
             
             when (result) {
                 is AutomationResult.Success -> {

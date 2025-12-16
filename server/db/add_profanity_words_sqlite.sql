@@ -128,3 +128,5 @@ INSERT OR IGNORE INTO profanity_words (word, type) VALUES
 -- 또는 SQLite GUI 도구에서 복사하여 실행
 --
 -- ============================================
+
+

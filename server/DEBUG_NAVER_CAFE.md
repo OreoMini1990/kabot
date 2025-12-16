@@ -114,3 +114,5 @@ if (trimmedMsg.toLowerCase().includes("질문")) {
 
 이 코드를 추가하면 "질문"이라는 단어가 포함된 메시지에 반응합니다.
 
+
+

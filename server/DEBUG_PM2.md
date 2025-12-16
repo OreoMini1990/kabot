@@ -143,3 +143,5 @@ pm2 logs kakkaobot-server --lines 50
    pm2 start config/ecosystem.config.js
    ```
 
+
+

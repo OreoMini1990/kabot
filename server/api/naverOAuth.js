@@ -5,7 +5,8 @@
 
 const express = require('express');
 const router = express.Router();
-const { getAuthorizationUrl, exchangeCodeForToken } = require('../integrations/naverCafe/naverOAuth');
+const { getAuthorizationUrl, exchangeCodeForToken, validateAccessToken } = require('../integrations/naverCafe/naverOAuth');
+const { saveToken } = require('../integrations/naverCafe/tokenManager');
 const crypto = require('crypto');
 
 /**
@@ -117,6 +118,32 @@ router.get('/callback', async (req, res) => {
         const result = await exchangeCodeForToken(code, clientId, clientSecret, redirectUri);
         
         if (result.success) {
+            // 토큰 유효성 검증 및 사용자 정보 가져오기
+            let userInfo = null;
+            try {
+                const validation = await validateAccessToken(result.access_token);
+                if (validation.valid && validation.user_info) {
+                    userInfo = validation.user_info;
+                }
+            } catch (err) {
+                console.warn('[네이버 OAuth] 사용자 정보 가져오기 실패 (무시):', err.message);
+            }
+            
+            // DB에 토큰 저장
+            const saveResult = await saveToken({
+                access_token: result.access_token,
+                refresh_token: result.refresh_token,
+                expires_in: result.expires_in,
+                token_type: result.token_type || 'bearer',
+                user_id: userInfo?.id || null,
+                user_name: userInfo?.name || null
+            });
+            
+            if (!saveResult) {
+                console.error('[네이버 OAuth] 토큰 DB 저장 실패 (토큰은 발급되었지만 저장되지 않음)');
+            } else {
+                console.log('[네이버 OAuth] 토큰 DB 저장 완료');
+            }
             res.send(`
                 <html>
                     <head>
@@ -135,7 +162,7 @@ router.get('/callback', async (req, res) => {
                         <h1>✅ Access Token 발급 완료!</h1>
                         
                         <div class="success">
-                            <strong>성공:</strong> Access Token이 발급되었습니다.
+                            <strong>성공:</strong> Access Token이 발급되었습니다.${saveResult ? ' DB에 자동 저장되었습니다.' : ' (DB 저장 실패 - 수동 설정 필요)'}
                         </div>
                         
                         <h2>발급된 토큰 정보</h2>
@@ -163,9 +190,9 @@ router.get('/callback', async (req, res) => {
                         <div class="warning">
                             <strong>⚠️ 중요:</strong>
                             <ol>
-                                <li>위 Access Token을 복사하여 .env 파일의 <code>NAVER_ACCESS_TOKEN</code>에 설정하세요.</li>
-                                <li>토큰은 약 1시간 후 만료됩니다. 만료되면 다시 발급받아야 합니다.</li>
-                                <li>${result.refresh_token ? 'Refresh Token을 사용하여 자동 갱신 기능을 구현할 수 있습니다.' : ''}</li>
+                                ${saveResult ? '<li>✅ 토큰이 DB에 자동 저장되었습니다. 이제 자동으로 관리됩니다.</li>' : '<li>토큰이 DB에 저장되지 않았습니다. 위 Access Token을 복사하여 .env 파일의 <code>NAVER_ACCESS_TOKEN</code>에 설정하세요.</li>'}
+                                <li>토큰은 약 1시간 후 만료됩니다.${result.refresh_token ? ' Refresh Token으로 자동 갱신됩니다.' : ' 만료되면 다시 발급받아야 합니다.'}</li>
+                                ${result.refresh_token ? '<li>✅ Refresh Token이 저장되어 자동 갱신이 활성화되었습니다.</li>' : ''}
                             </ol>
                         </div>
                         
