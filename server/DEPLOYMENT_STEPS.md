@@ -6,6 +6,9 @@
 - ✅ Git 커밋 완료
 - ✅ 코드 변경사항 적용 완료
 - ✅ 배포 가이드 문서 작성 완료
+- ✅ 자동 테스트 스크립트 작성 완료 (`server/test/test-chat-logging.js`)
+- ✅ 수동 테스트 체크리스트 작성 완료 (`server/test/test-manual-checklist.md`)
+- ✅ 테스트 실행 스크립트 작성 완료 (`run-tests.sh`, `run-tests.ps1`)
 
 ---
 
