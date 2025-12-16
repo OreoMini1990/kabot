@@ -102,8 +102,9 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
   ) STORED,
   
   -- FTS(Full Text Search)용 벡터 (검색 성능 향상)
+  -- 'korean' 설정이 없을 수 있으므로 'simple' 사용 (한국어도 검색 가능)
   message_text_tsvector TSVECTOR GENERATED ALWAYS AS (
-    to_tsvector('korean', COALESCE(message_text, ''))
+    to_tsvector('simple', COALESCE(message_text, ''))
   ) STORED
 );
 
