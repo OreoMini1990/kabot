@@ -918,6 +918,80 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
                 return replies;
             }
             
+            // ========== 연속 등록 제한 체크 (1시간 이내 같은 질문) ==========
+            const chatLogger = require('./db/chatLogger');
+            const questionSenderName = extractSenderName(sender);
+            const questionSenderId = sender.includes('/') ? sender.split('/')[1] : null;
+            
+            // 1시간 이내 같은 제목/내용의 질문 확인
+            try {
+                const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+                const recentQuestions = await chatLogger.getChatMessagesByPeriod(
+                    room,
+                    oneHourAgo,
+                    new Date().toISOString(),
+                    100
+                );
+                
+                // 같은 사용자의 같은 제목/내용 질문 확인
+                const duplicateQuestion = recentQuestions?.find(msg => 
+                    msg.sender_name === questionSenderName &&
+                    msg.message_text && 
+                    (msg.message_text.includes(title) || msg.message_text.includes(content.substring(0, 50)))
+                );
+                
+                if (duplicateQuestion) {
+                    const cafeUrl = 'https://cafe.naver.com/ramrc';
+                    replies.push(`⏸️ 연속 등록 제한\n\n` +
+                        `1시간 이내에 같은 질문을 등록할 수 없습니다.\n\n` +
+                        `카페에 직접 방문하여 작성해주세요:\n` +
+                        `${cafeUrl}`);
+                    return replies;
+                }
+            } catch (error) {
+                console.error('[네이버 카페] 연속 등록 체크 실패:', error.message);
+                // 체크 실패해도 질문 작성은 계속 진행
+            }
+            
+            // ========== 직전 메시지 이미지 확인 ==========
+            let previousMessageImage = null;
+            try {
+                const chatLoggerDb = require('./db/chatLogger');
+                // 최근 메시지 조회 (같은 사용자의 메시지)
+                const recentMessages = await chatLoggerDb.getChatMessagesByPeriod(
+                    room,
+                    new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5분 이내
+                    new Date().toISOString(),
+                    10
+                );
+                
+                // 같은 사용자의 가장 최근 메시지 중 이미지가 있는 것 찾기
+                if (recentMessages && recentMessages.length > 0) {
+                    for (const msg of recentMessages) {
+                        if (msg.sender_name === questionSenderName && msg.has_image) {
+                            // message_attachments 테이블에서 이미지 URL 조회
+                            const db = require('./db/database');
+                            const { data: attachments } = await db.supabase
+                                .from('message_attachments')
+                                .select('attachment_url, attachment_type')
+                                .eq('message_id', msg.id)
+                                .eq('attachment_type', 'image')
+                                .limit(1)
+                                .single();
+                            
+                            if (attachments && attachments.attachment_url) {
+                                previousMessageImage = attachments.attachment_url;
+                                console.log('[네이버 카페] 직전 메시지 이미지 발견:', previousMessageImage);
+                                break;
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('[네이버 카페] 직전 메시지 이미지 조회 실패:', error.message);
+                // 이미지 조회 실패해도 질문 작성은 계속 진행
+            }
+            
             // 환경변수 확인
             const naverEnabled = process.env.NAVER_CAFE_ENABLED === 'true';
             const accessToken = process.env.NAVER_ACCESS_TOKEN;
@@ -1011,8 +1085,18 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
                 console.log(`[네이버 카페] API 호출 완료: success=${result.success}, error=${result.error || '없음'}`);
                 
                 if (result.success && result.articleUrl) {
-                    // 성공 - 이전 템플릿 형식으로 응답 (질문 답변 포함)
-                    const replyMsg = `✅ 질문 작성 완료!\n\nQ. ${title}\n${content}\n\n답변하러가기: ${result.articleUrl}`;
+                    // 성공 - 템플릿 형식으로 응답 (질문 답변 포함)
+                    let replyMsg = `✅ 질문 작성 완료!\n\nQ. ${title}\n${content}\n\n`;
+                    
+                    // 이미지 첨부 여부 표시
+                    if (previousMessageImage) {
+                        replyMsg += `📷 (이미지 첨부)\n\n`;
+                    } else {
+                        replyMsg += `💡 참고: 사진이 첨부되어 있지 않다면 이미지 첨부도 가능합니다.\n` +
+                            `질문 직전에 이미지를 보내시면 함께 첨부됩니다.\n\n`;
+                    }
+                    
+                    replyMsg += `답변하러가기: ${result.articleUrl}`;
                     replies.push(replyMsg);
                 } else if (result.error === 'no_permission') {
                     // 권한 없음 - DB에만 저장
@@ -1027,7 +1111,15 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
                         headid: finalHeadid
                     });
                     
-                    replies.push(`⏳ 카페 글쓰기 권한이 없어 질문이 임시 저장되었습니다.\n관리자가 확인 후 작성해드리겠습니다.\n\nQ. ${title}\n${content}`);
+                    let replyMsg = `⏳ 카페 글쓰기 권한이 없어 질문이 임시 저장되었습니다.\n관리자가 확인 후 작성해드리겠습니다.\n\nQ. ${title}\n${content}\n\n`;
+                    
+                    if (previousMessageImage) {
+                        replyMsg += `📷 (이미지 첨부)\n\n`;
+                    } else {
+                        replyMsg += `💡 참고: 사진이 첨부되어 있지 않다면 이미지 첨부도 가능합니다.\n`;
+                    }
+                    
+                    replies.push(replyMsg);
                 } else {
                     // 기타 오류
                     replies.push(`❌ 질문 작성 중 오류가 발생했습니다.\n${result.message || '알 수 없는 오류'}\n\n다시 시도해주시거나 관리자에게 문의해주세요.`);
