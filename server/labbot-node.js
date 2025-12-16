@@ -2299,7 +2299,10 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
             const top3 = stats.slice(0, 3);
             let result = "🗣 이번 주 말 많은 TOP 3\n──────────\n";
             top3.forEach((user, index) => {
-                result += `${index + 1}위: ${user.user_name}님 (${user.message_count}회)\n`;
+                // user_statistics 테이블의 필드명: user_name, message_count
+                const userName = user.user_name || user.sender_name || '알 수 없음';
+                const messageCount = user.message_count || 0;
+                result += `${index + 1}위: ${userName}님 (${messageCount}회)\n`;
             });
             
             // 가장 반응 많이 받은 사용자
@@ -2373,7 +2376,10 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
             const top3 = stats.slice(0, 3);
             let result = "🗣 이번 달 말 많은 TOP 3\n──────────\n";
             top3.forEach((user, index) => {
-                result += `${index + 1}위: ${user.user_name}님 (${user.message_count}회)\n`;
+                // user_statistics 테이블의 필드명: user_name, message_count
+                const userName = user.user_name || user.sender_name || '알 수 없음';
+                const messageCount = user.message_count || 0;
+                result += `${index + 1}위: ${userName}님 (${messageCount}회)\n`;
             });
             
             // 가장 반응 많이 받은 사용자
