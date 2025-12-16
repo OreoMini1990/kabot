@@ -25,7 +25,7 @@ BEGIN
     cm.created_at
   FROM public.chat_messages cm
   WHERE cm.room_name = p_room_name
-    AND cm.message_text_tsvector @@ to_tsquery('korean', p_search_query)
+    AND cm.message_text_tsvector @@ to_tsquery('simple', p_search_query)
   ORDER BY cm.created_at DESC
   LIMIT p_limit;
 END;
@@ -45,7 +45,7 @@ BEGIN
   SELECT COUNT(*) INTO v_count
   FROM public.chat_messages
   WHERE room_name = p_room_name
-    AND message_text_tsvector @@ to_tsquery('korean', p_search_query);
+    AND message_text_tsvector @@ to_tsquery('simple', p_search_query);
   
   RETURN v_count;
 END;
