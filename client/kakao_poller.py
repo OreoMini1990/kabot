@@ -1310,10 +1310,23 @@ def send_to_server(message_data, is_reaction=False):
         # 복호화에는 자신의 user_id를 사용해야 함 (제공된 코드 방식)
         # 제공된 코드: decrypt(user_id, encType, b64_ciphertext)
         # 여기서 user_id는 자신의 user_id (메시지를 받는 사람의 user_id)
-        decrypt_user_id = MY_USER_ID if MY_USER_ID else (message_data.get("userId") or message_data.get("user_id"))
+        # 중요: MY_USER_ID를 우선 사용하고, 없으면 message_data의 myUserId 사용
+        decrypt_user_id = MY_USER_ID if MY_USER_ID else message_data.get("myUserId")
+        if not decrypt_user_id:
+            # 최후의 수단: userId나 user_id 사용 (하지만 이건 발신자 user_id이므로 복호화 실패 가능)
+            decrypt_user_id = message_data.get("userId") or message_data.get("user_id")
+            if decrypt_user_id:
+                print(f"[경고] MY_USER_ID가 없어 발신자 user_id로 복호화 시도 (실패 가능성 높음): {decrypt_user_id}")
+        
         enc_type = message_data.get("encType", 31)
         
-        if DECRYPT_ENABLED and decrypt_user_id:
+        # base64로 보이는 메시지는 암호화된 메시지일 가능성이 높음
+        is_base64_like = (isinstance(message, str) and 
+                         len(message) > 10 and 
+                         len(message) % 4 == 0 and
+                         all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in message))
+        
+        if DECRYPT_ENABLED and decrypt_user_id and is_base64_like:
             try:
                 # 숫자로 변환 시도 (큰 숫자도 처리)
                 try:
@@ -1322,16 +1335,30 @@ def send_to_server(message_data, is_reaction=False):
                     decrypt_user_id_int = None
                 
                 if decrypt_user_id_int and decrypt_user_id_int > 0:
-                    decrypted_message = decrypt_message(message, v_field, decrypt_user_id_int, enc_type, debug=True)
-                    if decrypted_message:
-                        print(f"[✓] 메시지 복호화 성공: user_id={decrypt_user_id_int}, enc_type={enc_type}")
-                    else:
-                        print(f"[✗] 메시지 복호화 실패: user_id={decrypt_user_id_int}, enc_type={enc_type}")
+                    # 여러 enc_type 시도 (31, 30, 32 순서)
+                    enc_candidates = [enc_type, 31, 30, 32]
+                    enc_candidates = list(dict.fromkeys(enc_candidates))  # 중복 제거
+                    
+                    for enc_try in enc_candidates:
+                        decrypted_message = decrypt_message(message, v_field, decrypt_user_id_int, enc_try, debug=True)
+                        if decrypted_message:
+                            print(f"[✓] 메시지 복호화 성공: user_id={decrypt_user_id_int}, enc_type={enc_try}")
+                            break
+                    
+                    if not decrypted_message:
+                        print(f"[✗] 메시지 복호화 실패: user_id={decrypt_user_id_int}, 시도한 enc_type={enc_candidates}")
+                        print(f"[디버그] MY_USER_ID={MY_USER_ID}, message_data.myUserId={message_data.get('myUserId')}")
+                        print(f"[디버그] message 길이={len(message)}, base64 형태={is_base64_like}")
             except Exception as e:
                 # 복호화 실패는 무시 (암호화되지 않은 메시지일 수 있음)
                 if message and len(message) > 10 and len(message) % 4 == 0:
                     print(f"[경고] 복호화 오류: {type(e).__name__}: {e}")
+                    import traceback
+                    traceback.print_exc()
                 pass
+        elif is_base64_like and not decrypt_user_id:
+            print(f"[경고] 암호화된 메시지로 보이지만 복호화할 user_id가 없습니다.")
+            print(f"[경고] MY_USER_ID={MY_USER_ID}, message_data.myUserId={message_data.get('myUserId')}")
         
         # 복호화 성공하면 복호화된 메시지 사용, 실패하면 원본 사용
         final_message = decrypted_message if decrypted_message else message
