@@ -950,7 +950,8 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
 
     // ========== 명령어 체크 ==========
     // msgTrimmed와 msgLower는 이미 위에서 선언됨
-    console.log(`[handleMessage] 명령어 체크: trimmedMsg="${msgTrimmed}", msgLower="${msgLower}"`);
+    const trimmedMsg = msgTrimmed; // 별칭 생성 (하위 호환성)
+    console.log(`[handleMessage] 명령어 체크: trimmedMsg="${trimmedMsg}", msgLower="${msgLower}"`);
     console.log(`[handleMessage] !이미지 체크: startsWith("!이미지")=${msgLower.startsWith("!이미지")}, startsWith("!image")=${msgLower.startsWith("!image")}`);
     
     // ========== 네이버 카페 질문 기능 (우선순위 높음) ==========

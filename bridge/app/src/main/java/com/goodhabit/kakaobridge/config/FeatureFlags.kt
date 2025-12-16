@@ -17,10 +17,10 @@ object FeatureFlags {
     private const val KEY_ACCESSIBILITY_SEND_ENABLED = "accessibility_send_enabled"
     private const val KEY_REMOTE_INPUT_SEND_ENABLED = "remote_input_send_enabled"
     
-    // 기본값: 접근성만 사용 (알림 리플라이 비활성화)
-    // 접근성 서비스가 활성화되면 접근성만 사용
+    // 기본값: RemoteInput 우선 사용 (알림 리플라이 활성화)
+    // 알림이 있으면 빠르게 답장, 없으면 접근성으로 fallback
     private const val DEFAULT_ACCESSIBILITY_ENABLED = true
-    private const val DEFAULT_REMOTE_INPUT_ENABLED = false
+    private const val DEFAULT_REMOTE_INPUT_ENABLED = true
     
     /**
      * 접근성 기반 전송 활성화 여부
@@ -57,13 +57,15 @@ object FeatureFlags {
     /**
      * 현재 활성화된 전송 방식 반환
      * 
-     * 둘 다 활성화되어 있으면 접근성 방식 우선 (더 직접적이고 안정적)
+     * 둘 다 활성화되어 있으면 RemoteInput 우선 (알림이 있으면 빠르게 답장)
+     * 알림이 없으면 Accessibility로 fallback
      */
     fun getActiveSendMethod(context: Context): SendMethod {
         return when {
-            isAccessibilitySendEnabled(context) -> SendMethod.ACCESSIBILITY
+            // RemoteInput이 활성화되어 있으면 우선 사용 (알림이 있으면 빠르게 답장)
             isRemoteInputSendEnabled(context) -> SendMethod.REMOTE_INPUT
-            else -> SendMethod.REMOTE_INPUT // 기본값
+            isAccessibilitySendEnabled(context) -> SendMethod.ACCESSIBILITY
+            else -> SendMethod.REMOTE_INPUT // 기본값: RemoteInput
         }
     }
     
