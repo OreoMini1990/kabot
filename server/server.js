@@ -1570,35 +1570,41 @@ wss.on('connection', function connection(ws, req) {
           } : null
         };
         
-        chatLogger.saveChatMessage(
-          decryptedRoomName || '',
-          senderName || sender || '',
-          senderId,
-          decryptedMessage || '',
-          isGroupChat !== undefined ? isGroupChat : true,
-          metadata,
-          replyToMessageId,
-          threadId
-        ).then(savedMessage => {
+        // 채팅 메시지 저장 및 닉네임 변경 감지
+        // 닉네임 변경 알림 변수 선언 (비동기 처리 전에 선언)
+        let nicknameChangeNotification = null;
+        
+        // 메시지 저장 및 닉네임 변경 감지 (비동기, 에러가 나도 계속 진행)
+        try {
+          const savedMessage = await chatLogger.saveChatMessage(
+            decryptedRoomName || '',
+            senderName || sender || '',
+            senderId,
+            decryptedMessage || '',
+            isGroupChat !== undefined ? isGroupChat : true,
+            metadata,
+            replyToMessageId,
+            threadId
+          );
+          
           // 닉네임 변경 감지 및 알림
           if (savedMessage) {
-            chatLogger.checkNicknameChange(
-              decryptedRoomName || '',
-              senderName || sender || '',
-              senderId
-            ).then(notification => {
-              if (notification) {
-                // 닉네임 변경 알림을 replies에 추가
-                // handleMessage 호출 전이므로 별도로 처리 필요
-                console.log('[닉네임 변경] 알림:', notification);
+            try {
+              nicknameChangeNotification = await chatLogger.checkNicknameChange(
+                decryptedRoomName || '',
+                senderName || sender || '',
+                senderId
+              );
+              if (nicknameChangeNotification) {
+                console.log('[닉네임 변경] 알림:', nicknameChangeNotification);
               }
-            }).catch(err => {
+            } catch (err) {
               console.error('[닉네임 변경] 감지 실패:', err.message);
-            });
+            }
           }
-        }).catch(err => {
+        } catch (err) {
           console.error('[채팅 로그] 저장 실패 (계속 진행):', err.message);
-        });
+        }
         
         const replies = await handleMessage(
           decryptedRoomName || '',
