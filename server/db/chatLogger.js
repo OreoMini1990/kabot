@@ -58,6 +58,15 @@ async function getOrCreateUser(roomName, senderName, senderId) {
         if (existingUser) {
             // 이름이 변경되었는지 확인
             if (existingUser.display_name !== senderName) {
+                // 닉네임 변경 감지 및 로깅
+                console.log('[닉네임 변경 감지]', {
+                    user_id: existingUser.id,
+                    kakao_user_id: existingUser.kakao_user_id,
+                    old_name: existingUser.display_name,
+                    new_name: senderName,
+                    room: roomName
+                });
+                
                 // 이름 변경 이력 저장
                 const { error: historyError } = await db.supabase
                     .from('user_name_history')
@@ -70,16 +79,43 @@ async function getOrCreateUser(roomName, senderName, senderId) {
                 
                 if (historyError) {
                     console.error('[채팅 로그] 이름 변경 이력 저장 실패:', historyError.message);
+                } else {
+                    console.log('[닉네임 변경] 이력 저장 완료:', {
+                        old_name: existingUser.display_name,
+                        new_name: senderName
+                    });
+                    
+                    // nickname_changes 테이블에도 저장 (모더레이션 로그)
+                    try {
+                        const moderationLogger = require('./moderationLogger');
+                        moderationLogger.saveNicknameChange({
+                            roomName: roomName,
+                            userId: existingUser.kakao_user_id || senderId,
+                            oldNickname: existingUser.display_name,
+                            newNickname: senderName
+                        });
+                    } catch (modErr) {
+                        console.error('[닉네임 변경] 모더레이션 로그 저장 실패:', modErr.message);
+                    }
                 }
                 
                 // 사용자 정보 업데이트
-                await db.supabase
+                const { error: updateError } = await db.supabase
                     .from('users')
                     .update({
                         display_name: senderName,
                         last_seen_at: new Date().toISOString()
                     })
                     .eq('id', existingUser.id);
+                
+                if (updateError) {
+                    console.error('[닉네임 변경] 사용자 정보 업데이트 실패:', updateError.message);
+                } else {
+                    console.log('[닉네임 변경] 사용자 정보 업데이트 완료');
+                }
+                
+                // 업데이트된 정보 반영
+                existingUser.display_name = senderName;
             } else {
                 // last_seen_at만 업데이트
                 await db.supabase
@@ -209,7 +245,7 @@ async function ensureRoomMembership(roomId, userId, role = 'member') {
 /**
  * 채팅 메시지 저장
  */
-async function saveChatMessage(roomName, senderName, senderId, messageText, isGroupChat = true, metadata = null, replyToMessageId = null, threadId = null) {
+async function saveChatMessage(roomName, senderName, senderId, messageText, isGroupChat = true, metadata = null, replyToMessageId = null, threadId = null, rawSender = null, kakaoLogId = null) {
     try {
         // 정규화된 사용자 및 채팅방 조회/생성
         const user = await getOrCreateUser(roomName, senderName, senderId);
@@ -244,6 +280,12 @@ async function saveChatMessage(roomName, senderName, senderId, messageText, isGr
         else if (hasUrl) messageType = 'link';
         
         // room_user_key와 message_text_tsvector는 GENERATED 컬럼이므로 자동 생성됨
+        // Phase 1.3: raw_sender, kakao_log_id 저장
+        const finalMetadata = {
+            ...metadata,
+            _id: kakaoLogId || metadata?._id  // metadata에도 저장 (이중화)
+        };
+        
         const { data, error } = await db.supabase
             .from('chat_messages')
             .insert({
@@ -252,6 +294,7 @@ async function saveChatMessage(roomName, senderName, senderId, messageText, isGr
                 user_id: user?.id || null,
                 sender_name: senderName,
                 sender_id: senderId || null,
+                raw_sender: rawSender || null,  // ✅ Phase 1.3: 원본 sender 문자열
                 message_text: messageText,
                 message_type: messageType,
                 is_group_chat: isGroupChat,
@@ -265,15 +308,32 @@ async function saveChatMessage(roomName, senderName, senderId, messageText, isGr
                 has_location: hasLocation,
                 reply_to_message_id: replyToMessageId || null,
                 thread_id: threadId || null,
-                metadata: metadata || null
+                kakao_log_id: kakaoLogId || null,  // ✅ Phase 1.3: 카카오톡 원본 logId
+                metadata: finalMetadata || null
             })
             .select()
             .single();
         
         if (error) {
             console.error('[채팅 로그] 메시지 저장 실패:', error.message);
+            console.error('[채팅 로그] 저장 시도 데이터:', {
+                room_name: roomName,
+                sender_name: senderName,
+                sender_id: senderId,
+                message_text_length: messageText?.length || 0,
+                message_type: messageType
+            });
             return null;
         }
+        
+        console.log('[채팅 로그] 메시지 저장 성공:', {
+            id: data?.id,
+            room_name: roomName,
+            sender_name: senderName,
+            sender_id: senderId,
+            message_text_preview: messageText?.substring(0, 50) + (messageText?.length > 50 ? '...' : ''),
+            message_type: messageType
+        });
         
         // 멘션 저장 (비동기)
         if (hasMention && data) {
@@ -891,15 +951,22 @@ async function checkNicknameChange(roomName, senderName, senderId) {
         // 현재 display_name과 비교
         if (existingUser.display_name === senderName) {
             // 이름이 같으면 변경 없음
+            console.log('[닉네임 변경] 변경 없음:', {
+                user_id: existingUser.id,
+                kakao_user_id: senderId,
+                display_name: existingUser.display_name,
+                current_sender_name: senderName
+            });
             return null;
         }
         
         // 이름이 변경된 경우
-        console.log('[닉네임 변경] 감지:', {
+        console.log('[닉네임 변경] ✅ 변경 감지:', {
             user_id: existingUser.id,
             kakao_user_id: senderId,
             old_name: existingUser.display_name,
-            new_name: senderName
+            new_name: senderName,
+            room_name: roomName
         });
         
         // 이름 변경 이력 저장 (getOrCreateUser에서도 저장되지만, 여기서도 명시적으로 저장)
@@ -952,49 +1019,93 @@ async function checkNicknameChange(roomName, senderName, senderId) {
  */
 async function saveReport(reportedMessageId, reporterName, reporterId, reportReason, reportType = 'general') {
     try {
-        // 신고 대상 메시지 조회 (원문 내용, 피신고자 정보 포함)
-        // reportedMessageId가 DB의 id일 수도 있고, 카카오톡의 chat_id일 수도 있음
+        console.log(`[신고] saveReport 시작: messageId=${reportedMessageId}, reporter=${reporterName}`);
+        
+        // 신고 대상 메시지 조회 (Phase 3: kakao_log_id 기준 통일)
+        // reportedMessageId는 kakao_log_id (카카오톡 원본 logId)를 의미
         let message = null;
         
-        // 1. 먼저 id로 검색
-        const { data: messageById } = await db.supabase
+        // 1. kakao_log_id로 직접 검색 (우선) - Phase 3
+        if (reportedMessageId) {
+            console.log(`[신고] 1. kakao_log_id로 검색: ${reportedMessageId}`);
+            const numericLogId = parseInt(reportedMessageId);
+            if (!isNaN(numericLogId)) {
+                const { data: messageByLogId, error: err1 } = await db.supabase
             .from('chat_messages')
-            .select('id, room_name, sender_name, sender_id, message_text, user_id, created_at, metadata')
-            .eq('id', reportedMessageId)
+                    .select('*')
+                    .eq('kakao_log_id', numericLogId)
             .single();
         
-        if (messageById) {
-            message = messageById;
+                if (messageByLogId) {
+                    message = messageByLogId;
+                    console.log(`[신고] ✅ kakao_log_id로 찾음: id=${message.id}, kakao_log_id=${message.kakao_log_id}`);
         } else {
-            // 2. metadata의 chat_id로 검색
-            const { data: messageByChatId } = await db.supabase
-                .from('chat_messages')
-                .select('id, room_name, sender_name, sender_id, message_text, user_id, created_at, metadata')
-                .eq('metadata->>chat_id', String(reportedMessageId))
-                .single();
-            
-            if (messageByChatId) {
-                message = messageByChatId;
-            } else {
-                // 3. 숫자로 변환 가능한 경우 숫자로도 시도
-                const numericId = parseInt(reportedMessageId);
-                if (!isNaN(numericId)) {
-                    const { data: messageByNumericId } = await db.supabase
-                        .from('chat_messages')
-                        .select('id, room_name, sender_name, sender_id, message_text, user_id, created_at, metadata')
-                        .eq('id', numericId)
-                        .single();
-                    
-                    if (messageByNumericId) {
-                        message = messageByNumericId;
-                    }
+                    console.log(`[신고] 1 실패: ${err1?.message || 'not found'}`);
                 }
             }
         }
         
+        // 2. fallback: metadata._id로 검색
+        if (!message && reportedMessageId) {
+            console.log(`[신고] 2. metadata._id로 검색: ${reportedMessageId}`);
+            const { data: messageByMetadata, error: err2 } = await db.supabase
+                .from('chat_messages')
+                .select('*')
+                .eq('metadata->>_id', String(reportedMessageId))
+                .single();
+            
+            if (messageByMetadata) {
+                message = messageByMetadata;
+                console.log(`[신고] ✅ metadata._id로 찾음: id=${message.id}`);
+            } else {
+                console.log(`[신고] 2 실패: ${err2?.message || 'not found'}`);
+            }
+        }
+        
+        // 3. fallback: DB id로 검색 (숫자인 경우)
+        if (!message && reportedMessageId && /^\d+$/.test(String(reportedMessageId))) {
+            console.log(`[신고] 3. DB id로 검색: ${reportedMessageId}`);
+            const { data: messageById, error: err3 } = await db.supabase
+                        .from('chat_messages')
+                .select('*')
+                .eq('id', parseInt(reportedMessageId))
+                        .single();
+                    
+            if (messageById) {
+                message = messageById;
+                console.log(`[신고] ✅ DB id로 찾음: id=${message.id}`);
+            } else {
+                console.log(`[신고] 3 실패: ${err3?.message || 'not found'}`);
+            }
+        }
+        
+        // 메시지를 찾지 못한 경우에도 신고 기록은 저장 (메시지 정보 없이)
         if (!message) {
-            console.error('[채팅 로그] 신고 대상 메시지를 찾을 수 없음:', reportedMessageId);
-            console.error('[채팅 로그] id, metadata->>chat_id, numericId 모두 시도했으나 실패');
+            console.warn('[신고] 대상 메시지를 찾을 수 없음, 기본 정보로 신고 저장:', reportedMessageId);
+            
+            // 메시지 없이도 신고 저장 시도 (report_logs 테이블 사용)
+            try {
+                const moderationLogger = require('./moderationLogger');
+                const result = await moderationLogger.saveReportLog({
+                    roomName: '',  // 알 수 없음
+                    reporterName: reporterName,
+                    reporterId: reporterId,
+                    reportedMessageId: String(reportedMessageId),
+                    reportedMessageText: null,
+                    reportedUserName: null,
+                    reportedUserId: null,
+                    reportReason: reportReason,
+                    reportType: reportType
+                });
+                
+                if (result) {
+                    console.log('[신고] report_logs에 저장 성공 (메시지 정보 없음):', result.id);
+                    return result;
+                }
+            } catch (modErr) {
+                console.error('[신고] report_logs 저장 실패:', modErr.message);
+            }
+            
             return null;
         }
         

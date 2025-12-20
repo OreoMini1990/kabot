@@ -110,3 +110,10 @@ supabase.from('profanity_words').select('*').limit(1).then(({data, error}) => {
 
 
 
+
+
+
+
+
+
+

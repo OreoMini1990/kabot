@@ -9,8 +9,11 @@ import android.util.Log
  * 
  * 알림이 올라올 때 replyAction을 캐싱하여, 
  * 전송 요청 시 즉시 사용할 수 있도록 함
+ * 
+ * 싱글톤으로 구현하여 BridgeForegroundService와 KakaoNotificationListenerService가
+ * 같은 캐시 인스턴스를 공유하도록 함
  */
-class NotificationActionCache {
+object NotificationActionCache {
     private val cache = mutableMapOf<String, CachedReplyAction>()
     private val lock = Any()
 

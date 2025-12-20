@@ -179,3 +179,8 @@ node test/test-chat-logging.js
 - **자동 테스트**: `server/test/test-chat-logging.js`
 - **수동 테스트**: `server/test/test-manual-checklist.md`
 
+
+
+
+
+

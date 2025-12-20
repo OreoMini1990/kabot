@@ -1,3 +1,4 @@
+
 /**
  * 네이버 카페 글쓰기 API 호출
  * 참고: https://developers.naver.com/docs/login/cafe-api/cafe-api.md
@@ -6,6 +7,9 @@
 const axios = require('axios');
 const iconv = require('iconv-lite');
 const querystring = require('querystring');
+const FormData = require('form-data');
+const fs = require('fs');
+const path = require('path');
 const { validateAccessToken } = require('./naverOAuth');
 const { validateAndRefreshToken } = require('./tokenManager');
 
@@ -18,9 +22,10 @@ const { validateAndRefreshToken } = require('./tokenManager');
  * @param {number} params.menuid - 게시판 메뉴 ID
  * @param {string} params.accessToken - 네이버 OAuth 액세스 토큰
  * @param {number} [params.headid] - 말머리 ID (선택사항)
+ * @param {Array<Buffer|string>} [params.images] - 이미지 파일 배열 (Buffer 또는 파일 경로)
  * @returns {Promise<Object>} { articleId, articleUrl }
  */
-async function writeCafeArticle({ subject, content, clubid, menuid, accessToken, headid }) {
+async function writeCafeArticle({ subject, content, clubid, menuid, accessToken, headid, images }) {
     try {
         // ========== 1단계: Access Token 유효성 검증 ==========
         console.log(`[네이버 카페] Access Token 검증 시작: accessToken 길이=${accessToken ? accessToken.length : 0}`);
@@ -62,53 +67,123 @@ async function writeCafeArticle({ subject, content, clubid, menuid, accessToken,
         // 네이버 카페 API 엔드포인트
         const apiUrl = `https://openapi.naver.com/v1/cafe/${clubid}/menu/${menuid}/articles`;
         
-        // 요청 파라미터 준비 (Java/Python 방식: UTF-8 URL 인코딩 → MS949 URL 인코딩)
-        // Java: URLEncoder.encode(URLEncoder.encode("카페 가입 인사", "UTF-8"), "MS949")
-        // Python: urllib.parse.quote()로 인코딩 후, urlencode() 사용
-        const querystring = require('querystring');
+        // 이미지가 있으면 multipart/form-data 사용, 없으면 application/x-www-form-urlencoded 사용
+        const hasImages = images && Array.isArray(images) && images.length > 0;
         
-        // 1단계: UTF-8로 URL 인코딩 (Python의 urllib.parse.quote와 동일)
-        const utf8EncodedSubject = encodeURIComponent(subject);
-        const utf8EncodedContent = encodeURIComponent(content);
+        let response;
         
-        // 2단계: UTF-8 인코딩된 문자열을 MS949로 변환 후 URL 인코딩
-        // Java의 URLEncoder.encode(utfStr, "MS949")와 동일
-        const encodeMs949 = (utf8Str) => {
-            // UTF-8 인코딩된 문자열을 MS949로 변환
-            const ms949Buffer = iconv.encode(utf8Str, 'EUC-KR');
-            // MS949 바이트를 퍼센트 인코딩 (% -> %25 등)
-            return Array.from(ms949Buffer)
-                .map(byte => '%' + byte.toString(16).toUpperCase().padStart(2, '0'))
-                .join('');
-        };
-        
-        const ms949Subject = encodeMs949(utf8EncodedSubject);
-        const ms949Content = encodeMs949(utf8EncodedContent);
-        
-        // 3단계: Python 예시처럼 직접 문자열 조합 (이미 인코딩된 값은 querystring.stringify 사용하지 않음)
-        // Python: data = "subject=" + subject + "&content=" + content
-        // headid 파라미터 추가 (말머리 ID - 문자열로 전달)
-        let formData = `subject=${ms949Subject}&content=${ms949Content}`;
-        if (headid !== null && headid !== undefined && headid !== '') {
-            // 문자열로 전달 (예: "단톡방질문")
-            formData += `&headid=${encodeURIComponent(String(headid))}`;
-            console.log(`[네이버 카페] 말머리(headid) 포함: "${headid}" (문자열)`);
+        if (hasImages) {
+            // ========== multipart/form-data 방식 (이미지 첨부) ==========
+            console.log(`[네이버 카페] 이미지 첨부 모드: ${images.length}개 이미지`);
+            
+            const formData = new FormData();
+            
+            // subject 필드 추가 (UTF-8 인코딩)
+            const utf8EncodedSubject = encodeURIComponent(subject);
+            formData.append('subject', utf8EncodedSubject);
+            
+            // content 필드 추가 (UTF-8 인코딩)
+            const utf8EncodedContent = encodeURIComponent(content);
+            formData.append('content', utf8EncodedContent);
+            
+            // headid 필드 추가 (있는 경우)
+            if (headid !== null && headid !== undefined && headid !== '') {
+                formData.append('headid', String(headid));
+                console.log(`[네이버 카페] 말머리(headid) 포함: "${headid}"`);
+            }
+            
+            // 이미지 파일 추가 (Java 예제처럼 fieldName은 "0" 사용)
+            for (let i = 0; i < images.length; i++) {
+                const image = images[i];
+                let imageBuffer;
+                let fileName = `image${i + 1}.jpg`;
+                
+                if (Buffer.isBuffer(image)) {
+                    // Buffer인 경우
+                    imageBuffer = image;
+                } else if (typeof image === 'string') {
+                    // 파일 경로인 경우
+                    if (fs.existsSync(image)) {
+                        imageBuffer = fs.readFileSync(image);
+                        fileName = path.basename(image) || fileName;
+                    } else {
+                        console.warn(`[네이버 카페] 이미지 파일을 찾을 수 없음: ${image}`);
+                        continue;
+                    }
+                } else {
+                    console.warn(`[네이버 카페] 지원하지 않는 이미지 형식: ${typeof image}`);
+                    continue;
+                }
+                
+                // Java 예제처럼 fieldName은 "0" 사용 (여러 이미지도 모두 "0")
+                formData.append('0', imageBuffer, {
+                    filename: fileName,
+                    contentType: 'image/jpeg' // 기본값, 필요시 MIME 타입 감지
+                });
+                
+                console.log(`[네이버 카페] 이미지 추가: ${fileName} (${imageBuffer.length} bytes)`);
+            }
+            
+            console.log(`[네이버 카페] 글쓰기 요청 (multipart): clubid=${clubid}, menuid=${menuid}, 이미지=${images.length}개, 제목=${subject.substring(0, 30)}...`);
+            
+            // multipart/form-data로 전송
+            response = await axios.post(apiUrl, formData, {
+                headers: {
+                    ...formData.getHeaders(),
+                    'Authorization': `Bearer ${validToken}`
+                },
+                maxRedirects: 0,
+                validateStatus: (status) => status >= 200 && status < 400
+            });
         } else {
-            console.log(`[네이버 카페] 말머리(headid) 없음 - headid=${headid}, 환경변수 NAVER_CAFE_HEADID 확인 필요`);
+            // ========== application/x-www-form-urlencoded 방식 (기존 방식, 이미지 없음) ==========
+            // 요청 파라미터 준비 (Java/Python 방식: UTF-8 URL 인코딩 → MS949 URL 인코딩)
+            // Java: URLEncoder.encode(URLEncoder.encode("카페 가입 인사", "UTF-8"), "MS949")
+            // Python: urllib.parse.quote()로 인코딩 후, urlencode() 사용
+            
+            // 1단계: UTF-8로 URL 인코딩 (Python의 urllib.parse.quote와 동일)
+            const utf8EncodedSubject = encodeURIComponent(subject);
+            const utf8EncodedContent = encodeURIComponent(content);
+            
+            // 2단계: UTF-8 인코딩된 문자열을 MS949로 변환 후 URL 인코딩
+            // Java의 URLEncoder.encode(utfStr, "MS949")와 동일
+            const encodeMs949 = (utf8Str) => {
+                // UTF-8 인코딩된 문자열을 MS949로 변환
+                const ms949Buffer = iconv.encode(utf8Str, 'EUC-KR');
+                // MS949 바이트를 퍼센트 인코딩 (% -> %25 등)
+                return Array.from(ms949Buffer)
+                    .map(byte => '%' + byte.toString(16).toUpperCase().padStart(2, '0'))
+                    .join('');
+            };
+            
+            const ms949Subject = encodeMs949(utf8EncodedSubject);
+            const ms949Content = encodeMs949(utf8EncodedContent);
+            
+            // 3단계: Python 예시처럼 직접 문자열 조합 (이미 인코딩된 값은 querystring.stringify 사용하지 않음)
+            // Python: data = "subject=" + subject + "&content=" + content
+            // headid 파라미터 추가 (말머리 ID - 문자열로 전달)
+            let formDataStr = `subject=${ms949Subject}&content=${ms949Content}`;
+            if (headid !== null && headid !== undefined && headid !== '') {
+                // 문자열로 전달 (예: "단톡방질문")
+                formDataStr += `&headid=${encodeURIComponent(String(headid))}`;
+                console.log(`[네이버 카페] 말머리(headid) 포함: "${headid}" (문자열)`);
+            } else {
+                console.log(`[네이버 카페] 말머리(headid) 없음 - headid=${headid}, 환경변수 NAVER_CAFE_HEADID 확인 필요`);
+            }
+            
+            console.log(`[네이버 카페] 글쓰기 요청: clubid=${clubid}, menuid=${menuid}, headid=${headid !== null && headid !== undefined ? headid : '없음'}, 제목=${subject.substring(0, 30)}...`);
+            console.log(`[네이버 카페] formData (일부): ${formDataStr.substring(0, 200)}...`);
+            
+            // API 호출 (갱신된 토큰 사용)
+            response = await axios.post(apiUrl, formDataStr, {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Authorization': `Bearer ${validToken}`
+                },
+                maxRedirects: 0,
+                validateStatus: (status) => status >= 200 && status < 400
+            });
         }
-        
-        console.log(`[네이버 카페] 글쓰기 요청: clubid=${clubid}, menuid=${menuid}, headid=${headid !== null && headid !== undefined ? headid : '없음'}, 제목=${subject.substring(0, 30)}...`);
-        console.log(`[네이버 카페] formData (일부): ${formData.substring(0, 200)}...`);
-        
-        // API 호출 (갱신된 토큰 사용)
-        const response = await axios.post(apiUrl, formData, {
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Authorization': `Bearer ${validToken}`
-            },
-            maxRedirects: 0,
-            validateStatus: (status) => status >= 200 && status < 400
-        });
         
         // 응답 전체 로깅 (디버깅용)
         console.log(`[네이버 카페] API 응답 상태: ${response.status}`);

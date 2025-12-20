@@ -47,3 +47,10 @@ pm2 restart kakkaobot-server
 
 
 
+
+
+
+
+
+
+

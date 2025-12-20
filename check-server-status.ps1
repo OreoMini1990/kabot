@@ -27,3 +27,10 @@ Write-Host "NAVER_CLIENT_SECRET: $env:NAVER_CLIENT_SECRET"
 
 Write-Host "`n=== 확인 완료 ===" -ForegroundColor Green
 
+
+
+
+
+
+
+

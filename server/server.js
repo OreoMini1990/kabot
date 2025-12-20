@@ -1123,47 +1123,195 @@ wss.on('connection', function connection(ws, req) {
         return; // ACK는 처리하지 않고 무시
       }
       
+      // ========== 메시지 삭제 감지 (v.origin === 'SYNCDLMSG') ==========
+      const { MESSAGE_DELETE_TRACKER, MEMBER_TRACKER } = require('./labbot-node');
+      const moderationLogger = require('./db/moderationLogger');
+      
+      if (messageData.json?.origin === 'SYNCDLMSG') {
+        console.log('[메시지 삭제] 감지됨:', { 
+          message_id: messageData.json?._id,
+          user_id: messageData.json?.user_id,
+          room: messageData.room
+        });
+        
+        // 삭제 횟수 추적 및 경고
+        const userId = messageData.json?.user_id || messageData.json?.userId;
+        if (userId && MESSAGE_DELETE_TRACKER) {
+          const deleteCount = MESSAGE_DELETE_TRACKER.addDeleteLog(userId);
+          // Phase 1.2: extractSenderName/extractSenderId 사용
+          const { extractSenderName, extractSenderId } = require('./labbot-node');
+          const senderName = extractSenderName(messageData.json, messageData.sender) || '사용자';
+          const senderId = extractSenderId(messageData.json, messageData.sender) || userId;
+          const warningLevel = Math.min(deleteCount, 3);
+          
+          if (deleteCount > 0) {
+            const warningMsg = MESSAGE_DELETE_TRACKER.getWarningMessage(senderName, deleteCount);
+            console.log(`[메시지 삭제] ${senderName} - ${deleteCount}회 감지`);
+            
+            // DB에 메시지 삭제 경고 저장
+            moderationLogger.saveMessageDeleteWarning({
+              roomName: messageData.room,
+              senderName: senderName,
+              senderId: senderId,
+              deletedMessageId: messageData.json?._id,
+              deletedMessageText: messageData.json?.message,  // 삭제된 메시지 내용 (있는 경우)
+              deleteCount24h: deleteCount,
+              warningLevel: warningLevel
+            });
+            
+            // 경고 메시지 전송 (handleMessage 대신 직접 응답)
+            ws.send(JSON.stringify({
+              type: 'reply',
+              replies: [warningMsg],
+              room: messageData.room,
+              chat_id: messageData.json?.chat_id
+            }));
+          }
+        }
+        return; // 삭제된 메시지는 추가 처리 안함
+      }
+      
+      // ========== Feed 메시지 처리 (강퇴 등) ==========
+      // msg_type이 특정 값일 때 Feed로 처리 (참고: DBManager의 Feed 타입)
+      const msgType = messageData.json?.msg_type;
+      const attachment = messageData.json?.attachment;
+      
+      // attachment가 JSON 문자열인 경우 파싱
+      let feedData = null;
+      if (attachment) {
+        try {
+          feedData = typeof attachment === 'string' ? JSON.parse(attachment) : attachment;
+        } catch (e) {
+          // 파싱 실패는 무시
+        }
+      }
+      
+      // feedType 확인 (attachment 내 feedType 필드)
+      if (feedData && feedData.feedType && MEMBER_TRACKER) {
+        const feedResult = MEMBER_TRACKER.processFeedMessage(
+          feedData.feedType,
+          feedData,
+          messageData.room
+        );
+        
+        if (feedResult.handled && feedResult.message) {
+          console.log(`[Feed] ${feedResult.type} 처리됨:`, feedResult.message);
+          
+          // DB에 저장 (강퇴 또는 입퇴장)
+          if (feedResult.type === 'kick') {
+            // 강퇴 기록 저장
+            moderationLogger.saveMemberKick({
+              roomName: messageData.room,
+              kickedUserName: feedData?.member?.nickName || feedData?.kickedUser?.nickName || '알 수 없음',
+              kickedUserId: feedData?.member?.userId || feedData?.kickedUser?.userId,
+              kickedByName: feedData?.kicker?.nickName || feedData?.kickedBy?.name || '관리자',
+              kickedById: feedData?.kicker?.userId || feedData?.kickedBy?.userId,
+              kickReason: feedData?.reason || null
+            });
+          } else if (feedResult.type === 'join' || feedResult.type === 'leave' || feedResult.type === 'invite') {
+            // 입퇴장 기록 저장 (주석 해제 시 활성화)
+            const members = feedData?.members || [feedData?.member];
+            for (const member of members) {
+              if (member) {
+                moderationLogger.saveMemberActivity({
+                  roomName: messageData.room,
+                  userName: member?.nickName || '알 수 없음',
+                  userId: member?.userId,
+                  activityType: feedResult.type,
+                  invitedByName: feedData?.inviter?.nickName,
+                  invitedById: feedData?.inviter?.userId,
+                  isKicked: feedData?.kicked === true
+                });
+              }
+            }
+          }
+          
+          // Feed 알림 메시지 전송
+          ws.send(JSON.stringify({
+            type: 'reply',
+            replies: [feedResult.message],
+            room: messageData.room,
+            chat_id: messageData.json?.chat_id
+          }));
+          return; // Feed 메시지는 추가 처리 안함
+        }
+      }
+      
       // 반응(reaction) 메시지 처리
       if (messageData.type === 'reaction' || messageData.type === 'like') {
         const { room, sender, json } = messageData;
         const chatLogger = require('./db/chatLogger');
         
         try {
-          // 반응 정보 추출
-          const targetMessageId = json?.target_message_id || json?.message_id || json?.chat_id || null;
-          const reactionType = json?.reaction_type || json?.reaction || 'thumbs_up';
-          const reactorName = sender && sender.includes('/') ? sender.split('/')[0] : sender || '';
-          const reactorId = sender && sender.includes('/') ? sender.split('/')[1] : null;
+          // 반응 정보 추출 (더 많은 필드 확인)
+          const targetMessageId = json?.target_message_id || json?.target_id || json?.message_id || json?.chat_id || null;
+          const reactionType = json?.reaction_type || json?.reaction || json?.like || 'thumbs_up';
+          
+          // sender에서 이름과 ID 추출
+          let reactorName = '';
+          let reactorId = null;
+          
+          if (sender) {
+            if (sender.includes('/')) {
+              const parts = sender.split('/');
+              reactorName = parts[0].trim();
+              reactorId = parts[1] || null;
+            } else {
+              reactorName = sender;
+              // json에서 user_id 찾기
+              reactorId = json?.user_id || json?.userId || null;
+            }
+          }
           
           // 관리자 반응 여부 확인
           const { CONFIG } = require('./labbot-node');
           const isAdminReaction = CONFIG.ADMIN_USERS.some(admin => {
             const adminName = admin.includes('/') ? admin.split('/')[0] : admin;
-            return adminName === reactorName;
+            const adminId = admin.includes('/') ? admin.split('/')[1] : null;
+            return (reactorName && adminName === reactorName) || (reactorId && adminId && reactorId === adminId);
           });
           
           if (targetMessageId && reactorName) {
             await chatLogger.saveReaction(
-              targetMessageId,
+              String(targetMessageId), // 문자열로 변환
               reactionType,
               reactorName,
-              reactorId,
+              reactorId ? String(reactorId) : null,
               isAdminReaction
             );
-            console.log('[반응 저장] 성공:', {
+            
+            // 반응 상세 로그도 저장
+            moderationLogger.saveReactionLog({
+              roomName: room,
+              targetMessageId: String(targetMessageId),
+              targetMessageText: null,  // 대상 메시지 내용은 별도 조회 필요
+              reactorName: reactorName,
+              reactorId: reactorId,
+              reactionType: reactionType,
+              isAdminReaction: isAdminReaction
+            });
+            
+            console.log('[반응 저장] ✅ 성공:', {
               message_id: targetMessageId,
               reaction_type: reactionType,
               reactor: reactorName,
-              is_admin: isAdminReaction
+              reactor_id: reactorId,
+              is_admin: isAdminReaction,
+              room: room,
+              sender_original: sender
             });
           } else {
-            console.warn('[반응 저장] 실패: targetMessageId 또는 reactorName 없음', {
+            console.warn('[반응 저장] ❌ 실패: targetMessageId 또는 reactorName 없음', {
               targetMessageId,
-              reactorName
+              reactorName,
+              reactorId,
+              json: JSON.stringify(json).substring(0, 200),
+              sender: sender,
+              room: room
             });
           }
         } catch (err) {
-          console.error('[반응 저장] 오류:', err.message);
+          console.error('[반응 저장] 오류:', err.message, err.stack);
         }
         
         return; // 반응 메시지는 추가 처리 불필요
@@ -1593,104 +1741,153 @@ wss.on('connection', function connection(ws, req) {
           return;
         }
         
-        // 발신자 이름 및 ID 추출 (복호화된 값 사용)
-        // sender는 이미 위에서 복호화되었을 수 있음 ("닉네임/user_id" 형식)
-        let senderName = null;
-        let senderId = null;
+        // 발신자 이름 및 ID 추출 (Phase 1.2: extractSenderName/extractSenderId 함수 사용)
+        const { extractSenderName, extractSenderId } = require('./labbot-node');
         
-        if (sender && sender.includes('/')) {
-          // "닉네임/user_id" 형식
-          const senderParts = sender.split('/');
-          senderName = senderParts[0].trim();
-          senderId = senderParts[1] || null;
-        } else if (sender) {
-          // sender가 단일 값인 경우
-          senderName = String(sender).trim();
-        }
+        // 디버깅: json 필드 확인
+        console.log(`[발신자] 디버깅: json.sender_name_decrypted="${json?.sender_name_decrypted}", json.sender_name="${json?.sender_name}", json.user_name="${json?.user_name}", sender="${sender}"`);
         
-        // json에서 추가 정보 확인 (복호화된 값 우선)
-        // 클라이언트에서 이미 복호화된 user_name 또는 sender_name 사용 (최우선)
-        if (json) {
-          // 클라이언트에서 복호화된 이름이 있으면 우선 사용
-          const clientDecryptedName = json.user_name || json.sender_name || json.userName;
-          if (clientDecryptedName && typeof clientDecryptedName === 'string') {
-            // 암호화된 형태가 아니면 사용 (클라이언트에서 이미 복호화했을 가능성)
-            const isEncrypted = clientDecryptedName.length > 10 && 
-                               clientDecryptedName.length % 4 === 0 &&
-                               /^[A-Za-z0-9+/=]+$/.test(clientDecryptedName);
-            if (!isEncrypted && clientDecryptedName !== '.' && !clientDecryptedName.startsWith('/')) {
-              senderName = clientDecryptedName;
-              console.log(`[발신자] 클라이언트에서 복호화된 이름 사용: "${senderName}"`);
-            } else if (isEncrypted) {
-              // 여전히 암호화되어 있으면 서버에서 복호화 시도
-              console.log(`[발신자] 클라이언트에서 보낸 이름이 여전히 암호화되어 있음, 서버에서 복호화 시도`);
-              // 서버에서 복호화 시도
-              const myUserId = json.myUserId || json.userId || json.user_id;
-              if (myUserId) {
-                for (const encTry of [31, 30, 32]) {
-                  try {
-                    const decrypted = decryptKakaoTalkMessage(clientDecryptedName, String(myUserId), encTry);
-                    if (decrypted && decrypted !== clientDecryptedName && !/[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(decrypted)) {
-                      senderName = decrypted;
-                      console.log(`[발신자] 서버에서 복호화 성공: "${clientDecryptedName.substring(0, 20)}..." -> "${decrypted}"`);
-                      break;
+        let senderName = extractSenderName(json, sender);
+        let senderId = extractSenderId(json, sender);
+        
+        console.log(`[발신자] 추출 완료: senderName="${senderName}", senderId="${senderId}"`);
+        
+        // 최종 값 확인 (복호화된 값이어야 함)
+        // senderName이 여전히 암호화되어 있거나 유효하지 않은 경우에만 fallback 처리
+        if (!senderName) {
+          // sender 필드에서 추출 시도 (하위 호환성)
+          if (sender && sender.includes('/')) {
+            const parts = sender.split('/');
+            const namePart = parts[0];
+            if (namePart && json) {
+              // sender 필드의 이름 부분이 암호화되어 있는지 확인
+              const isEncrypted = namePart.length > 10 && 
+                                 namePart.length % 4 === 0 &&
+                                 /^[A-Za-z0-9+/=]+$/.test(namePart);
+              
+              if (!isEncrypted && namePart !== '.' && !namePart.startsWith('/')) {
+                // 이미 복호화된 것으로 보임
+                senderName = namePart;
+                console.log(`[발신자] sender 필드에서 복호화된 이름 추출: "${senderName}"`);
+              } else if (isEncrypted) {
+                // 암호화되어 있으면 복호화 시도 (최후의 수단)
+                const myUserId = json.myUserId || json.userId || json.user_id || parts[1];
+                const isValidUserId = (uid) => {
+                  if (!uid) return false;
+                  const uidNum = Number(uid);
+                  return uidNum > 1000;
+                };
+                
+                if (myUserId && isValidUserId(myUserId)) {
+                  console.log(`[발신자] sender 필드의 암호화된 이름 복호화 시도: "${namePart.substring(0, 20)}..."`);
+                  for (const encTry of [31, 30, 32]) {
+                    try {
+                      const decrypted = decryptKakaoTalkMessage(namePart, String(myUserId), encTry);
+                      if (decrypted && decrypted !== namePart && !/[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(decrypted)) {
+                        senderName = decrypted;
+                        console.log(`[발신자] sender 필드에서 복호화 성공: "${namePart.substring(0, 20)}..." -> "${decrypted}"`);
+                        break;
+                      }
+                    } catch (e) {
+                      // 복호화 실패는 무시하고 다음 시도
                     }
-                  } catch (e) {
-                    // 복호화 실패는 무시하고 다음 시도
                   }
                 }
               }
             }
           }
           
-          // sender_id 추출
-          if (!senderId) {
-            senderId = json.user_id || json.userId || json.sender_id || null;
+          // 여전히 없으면 sender 그대로 사용 (fallback)
+          if (!senderName) {
+            if (sender && sender.includes('/')) {
+              senderName = sender.split('/')[0].trim();
+            } else if (sender) {
+              senderName = String(sender).trim();
+            } else {
+              senderName = '';
+            }
           }
         }
         
-        // 최종 값 확인 (복호화된 값이어야 함)
-        // senderName이 여전히 암호화되어 있거나 유효하지 않은 경우 복호화 시도
-        const isSenderNameEncrypted = senderName && senderName.length > 10 && 
-                                      senderName.length % 4 === 0 &&
-                                      /^[A-Za-z0-9+/=]+$/.test(senderName);
-        
-        if (!senderName || isSenderNameEncrypted || senderName.includes('QvsAQ4wyJs3LVpLw2XTaw==') || senderName.startsWith('/')) {
-          if (isSenderNameEncrypted) {
-            console.warn(`[발신자 이름] 암호화된 값 감지: "${senderName.substring(0, 20)}...", 원본 sender: "${sender}"`);
-          } else {
-            console.warn(`[발신자 이름] 복호화되지 않은 값 감지: "${senderName}", 원본 sender: "${sender}"`);
-          }
+        // 최종 검증: senderName이 여전히 암호화되어 있으면 복호화 재시도
+        // 하지만 sender 필드에 복호화된 이름이 있으면 그것을 우선 사용
+        if (!senderName && sender && sender.includes('/')) {
+          const senderParts = sender.split('/');
+          const senderNamePart = senderParts.slice(0, -1).join('/'); // 마지막이 user_id이므로 제외
+          const lastPart = senderParts[senderParts.length - 1];
           
-          // 복호화 시도 (sender 필드에서)
-          if (sender && sender.includes('/')) {
-            const parts = sender.split('/');
-            const namePart = parts[0];
-            if (namePart && json) {
-              const myUserId = json.myUserId || json.userId || json.user_id || parts[1];
-              // userId 유효성 검사
-              const isValidUserId = (uid) => {
-                if (!uid) return false;
-                const uidNum = Number(uid);
-                return uidNum > 1000;
-              };
+          // 마지막 부분이 숫자(user_id)면, 나머지가 닉네임
+          if (/^\d+$/.test(lastPart.trim())) {
+            // 닉네임 부분이 base64로 보이지 않으면 복호화된 것으로 간주
+            const isNotEncrypted = !(senderNamePart.length > 5 && /^[A-Za-z0-9+/=]+$/.test(senderNamePart));
+            if (isNotEncrypted && senderNamePart.trim()) {
+              senderName = senderNamePart.trim();
+              console.log(`[발신자] sender 필드에서 복호화된 이름 추출 (최종 검증): "${senderName}"`);
+            }
+          }
+        }
+        
+        // senderName이 여전히 없거나 암호화된 상태인 경우, sender 필드 재확인
+        if (senderName) {
+          // base64 형태 확인 (길이 조건 완화: 5자 이상)
+          const isStillEncrypted = senderName.length > 5 && 
+                                   /^[A-Za-z0-9+/=]+$/.test(senderName);
+          if (isStillEncrypted && json) {
+            // sender 필드에 복호화된 이름이 있는지 다시 확인
+            if (sender && sender.includes('/')) {
+              const senderParts = sender.split('/');
+              const senderNamePart = senderParts.slice(0, -1).join('/');
+              const lastPart = senderParts[senderParts.length - 1];
               
-              if (myUserId && isValidUserId(myUserId)) {
-                for (const encTry of [31, 30, 32]) {
-                  try {
-                    const decrypted = decryptKakaoTalkMessage(namePart, String(myUserId), encTry);
-                    if (decrypted && decrypted !== namePart && !/[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(decrypted)) {
-                      senderName = decrypted;
-                      console.log(`[발신자 이름] 복호화 성공: "${namePart.substring(0, 20)}..." -> "${decrypted}"`);
-                      break;
-                    }
-                  } catch (e) {
-                    // 복호화 실패는 무시하고 다음 시도
-                  }
+              if (/^\d+$/.test(lastPart.trim())) {
+                const isNotEncrypted = !(senderNamePart.length > 5 && /^[A-Za-z0-9+/=]+$/.test(senderNamePart));
+                if (isNotEncrypted && senderNamePart.trim()) {
+                  // sender 필드에 복호화된 이름이 있으면 그것을 사용 (경고 없이)
+                  senderName = senderNamePart.trim();
+                  console.log(`[발신자] sender 필드에서 복호화된 이름 사용 (암호화 경고 무시): "${senderName}"`);
+                } else {
+                  // sender 필드도 암호화되어 있으면 경고 출력
+                  console.warn(`[발신자] ⚠️ senderName이 여전히 암호화된 상태: "${senderName}"`);
                 }
               } else {
-                console.warn(`[발신자 이름] 유효하지 않은 user_id로 복호화 시도 불가: ${myUserId}`);
+                // sender 필드 파싱 실패 시 경고 출력
+                console.warn(`[발신자] ⚠️ senderName이 여전히 암호화된 상태: "${senderName}"`);
               }
+            } else {
+              // sender 필드가 없거나 파싱 불가 시 경고 출력
+              console.warn(`[발신자] ⚠️ senderName이 여전히 암호화된 상태: "${senderName}"`);
+            }
+            
+            // 경고 출력 후에만 복호화 시도
+            if (isStillEncrypted && senderName.length > 5 && /^[A-Za-z0-9+/=]+$/.test(senderName)) {
+            const myUserId = json.myUserId || json.userId || json.user_id;
+            if (myUserId) {
+              console.log(`[발신자] 최종 복호화 시도: myUserId=${myUserId}, senderName="${senderName}"`);
+              for (const encTry of [31, 30, 32]) {
+                try {
+                  const decrypted = decryptKakaoTalkMessage(senderName, String(myUserId), encTry);
+                  if (decrypted && decrypted !== senderName) {
+                    const hasControlChars = /[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(decrypted);
+                    if (!hasControlChars && decrypted.length > 0) {
+                      console.log(`[발신자] ✅ 최종 복호화 성공: "${senderName}" -> "${decrypted}" (enc=${encTry})`);
+                      senderName = decrypted;
+                      break;
+                    } else {
+                      console.log(`[발신자] 최종 복호화 결과 무효: enc=${encTry}, 결과="${decrypted}", 제어문자=${hasControlChars}`);
+                    }
+                  }
+                } catch (e) {
+                  console.log(`[발신자] 최종 복호화 시도 실패: enc=${encTry}, 오류=${e.constructor.name}: ${e.message}`);
+                }
+              }
+              
+              // 여전히 암호화된 상태인지 확인
+              const stillEncrypted = senderName.length > 5 && /^[A-Za-z0-9+/=]+$/.test(senderName);
+              if (stillEncrypted) {
+                console.warn(`[발신자] ❌ 최종 복호화 실패: senderName="${senderName}" (모든 enc 후보 시도 완료)`);
+              }
+            } else {
+              console.warn(`[발신자] 최종 복호화 불가: myUserId 없음`);
             }
           }
         }
@@ -1737,6 +1934,7 @@ wss.on('connection', function connection(ws, req) {
         
         // 메시지 저장 및 닉네임 변경 감지 (비동기, 에러가 나도 계속 진행)
         try {
+          // Phase 1.3: raw_sender, kakao_log_id 전달
           const savedMessage = await chatLogger.saveChatMessage(
             decryptedRoomName || '',
             senderName || sender || '',
@@ -1745,22 +1943,97 @@ wss.on('connection', function connection(ws, req) {
             isGroupChat !== undefined ? isGroupChat : true,
             metadata,
             replyToMessageId,
-            threadId
+            threadId,
+            sender,  // raw_sender (원본 sender 문자열)
+            json?._id || json?.kakao_log_id  // kakao_log_id
           );
+          
+          // 이미지 첨부 정보 저장 (메시지 타입이 이미지인 경우)
+          if (savedMessage && json) {
+            try {
+              const msgType = json.msg_type || json.type;
+              
+              // 이미지 타입: 2 (사진), 12 (이미지 업로드), 27 (사진 앨범)
+              const imageTypes = [2, 12, 27, '2', '12', '27'];
+              
+              if (imageTypes.includes(msgType)) {
+                // Phase 2: attachment_decrypted 우선 사용 (복호화된 attachment)
+                let attachInfo = json.attachment_decrypted || null;
+                
+                // attachment_decrypted가 없으면 attachment 파싱 시도 (fallback)
+                if (!attachInfo && json.attachment) {
+                  const attachmentData = json.attachment;
+                  if (typeof attachmentData === 'string') {
+                    try {
+                      attachInfo = JSON.parse(attachmentData);
+                    } catch (e) {
+                      // 파싱 실패
+                      console.log(`[이미지 저장] attachment 파싱 실패: ${e.message}`);
+                    }
+                  } else if (typeof attachmentData === 'object') {
+                    attachInfo = attachmentData;
+                  }
+                }
+                
+                if (attachInfo && typeof attachInfo === 'object') {
+                  // 이미지 URL 추출 (다양한 필드명 지원)
+                  const imageUrl = attachInfo.url || attachInfo.thumbnailUrl || 
+                                  attachInfo.path || attachInfo.path_1 ||
+                                  attachInfo.xl || attachInfo.l || attachInfo.m || attachInfo.s;
+                  
+                  if (imageUrl) {
+                    await chatLogger.saveAttachment(
+                      savedMessage.id,
+                      'image',
+                      imageUrl,
+                      attachInfo.name || null,
+                      attachInfo.size || null,
+                      attachInfo.mime_type || 'image/jpeg',
+                      attachInfo.thumbnailUrl || null,
+                      attachInfo
+                    );
+                    console.log(`[이미지 저장] ✅ 성공: message_id=${savedMessage.id}, url=${imageUrl.substring(0, 50)}...`);
+                    
+                    // Phase 4: 캐시에 저장
+                    const { setPendingAttachment } = require('./labbot-node');
+                    const roomName = decryptedRoomName || '';
+                    setPendingAttachment(roomName, senderId, imageUrl);
+                  } else {
+                    console.log(`[이미지 저장] ⚠️ 이미지 URL을 찾을 수 없음: msgType=${msgType}, attachInfo keys=${Object.keys(attachInfo).join(', ')}`);
+                  }
+                } else {
+                  console.log(`[이미지 저장] ⚠️ attachment 정보 없음: msgType=${msgType}`);
+                }
+              }
+            } catch (imgErr) {
+              console.error('[이미지 저장] ❌ 실패:', imgErr.message);
+              console.error('[이미지 저장] 스택:', imgErr.stack);
+            }
+          }
           
           // 닉네임 변경 감지 및 알림
           if (savedMessage) {
             try {
-              nicknameChangeNotification = await chatLogger.checkNicknameChange(
-                decryptedRoomName || '',
-                senderName || sender || '',
-                senderId
-              );
-              if (nicknameChangeNotification) {
-                console.log('[닉네임 변경] 알림:', nicknameChangeNotification);
+              // senderId 추출 강화 - json에서 user_id 확인
+              const effectiveSenderId = senderId || json?.user_id || json?.userId || json?.sender_id || null;
+              console.log(`[닉네임 변경] 감지 시도: senderName="${senderName || sender}", senderId="${effectiveSenderId}"`);
+              
+              if (effectiveSenderId) {
+                nicknameChangeNotification = await chatLogger.checkNicknameChange(
+                  decryptedRoomName || '',
+                  senderName || sender || '',
+                  effectiveSenderId
+                );
+                if (nicknameChangeNotification) {
+                  console.log('[닉네임 변경] ✅ 알림 생성:', nicknameChangeNotification);
+                } else {
+                  console.log('[닉네임 변경] 변경 없음 또는 새 사용자');
+                }
+              } else {
+                console.log('[닉네임 변경] ⚠️ senderId 없음, 감지 스킵');
               }
             } catch (err) {
-              console.error('[닉네임 변경] 감지 실패:', err.message);
+              console.error('[닉네임 변경] ❌ 감지 실패:', err.message, err.stack);
             }
           }
           
@@ -1775,9 +2048,10 @@ wss.on('connection', function connection(ws, req) {
               // 반응한 사용자 (현재 메시지 발신자가 반응을 준 사람)
               const reactorName = senderName || sender || '';
               const reactorId = senderId || null;
-              // 관리자 반응 여부
+              // 관리자 반응 여부 (Phase 1.2: extractSenderName 사용)
+              const { extractSenderName } = require('./labbot-node');
               const isAdminReaction = CONFIG.ADMIN_USERS.some(admin => {
-                const adminName = admin.includes('/') ? admin.split('/')[0] : admin;
+                const adminName = typeof admin === 'string' ? extractSenderName(null, admin) : extractSenderName(admin, null);
                 return adminName === reactorName;
               });
               
@@ -2295,3 +2569,4 @@ process.on('uncaughtException', function (error) {
 process.on('unhandledRejection', function (reason) {
   console.error(`[${new Date().toISOString()}] unhandledRejection:`, reason);
 });
+

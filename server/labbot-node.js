@@ -8,6 +8,7 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 const db = require('./db/database');
+const moderationLogger = require('./db/moderationLogger');
 
 // ========== 설정 ==========
 const CONFIG = {
@@ -38,7 +39,48 @@ const CONFIG = {
         SHOP_SYSTEM: false,       // 상점 기능 (false = 비활성화)
         MEMBERSHIP_SYSTEM: false, // 멤버십/내정보 기능 (false = 비활성화)
         NAVER_CAFE: process.env.NAVER_CAFE_ENABLED === 'true',  // 네이버 카페 질문 기능
-        USE_ONNOTI: false        // onNoti 함수 사용 (WebSocket 환경에서는 false)
+        USE_ONNOTI: false,        // onNoti 함수 사용 (WebSocket 환경에서는 false)
+        // ========== 새 기능들 ==========
+        PROMOTION_DETECTION: true,    // 무단 홍보 감지 (활성화)
+        NICKNAME_CHANGE_DETECTION: true, // 닉네임 변경 감지 (활성화)
+        MESSAGE_DELETE_DETECTION: true,  // 메시지 삭제 감지 (활성화)
+        // JOIN_LEAVE_DETECTION: true,   // 입퇴장 감지 (주석 처리 - 비활성화)
+        KICK_DETECTION: true          // 강퇴 감지 (활성화)
+    },
+    
+    // ========== 무단 홍보 감지 설정 ==========
+    PROMOTION_DETECTION: {
+        // 금지 도메인 목록
+        BANNED_DOMAINS: [
+            'open.kakao.com',     // 오픈채팅 홍보
+            'toss.me',            // 토스 홍보
+            'toss.im',            // 토스 홍보
+            'discord.gg',         // 디스코드 홍보
+            'discord.com/invite'  // 디스코드 초대
+        ],
+        // 화이트리스트 도메인 (허용)
+        WHITELIST_DOMAINS: [
+            'naver.com',
+            'google.com',
+            'youtube.com',
+            'youtu.be'
+        ],
+        // 경고 단계별 메시지
+        WARNING_MESSAGES: {
+            1: "⚠️ 무단 홍보가 감지되었습니다.\n첫 번째 경고입니다. 무단 홍보는 자제해 주세요.",
+            2: "⚠️⚠️ 무단 홍보 2회 감지!\n두 번째 경고입니다. 계속 시 관리자에게 보고됩니다.",
+            3: "🚨 무단 홍보 3회 감지!\n관리자에게 보고되었습니다."
+        }
+    },
+    
+    // ========== 메시지 삭제 감지 설정 ==========
+    MESSAGE_DELETE_DETECTION: {
+        WARNING_MESSAGES: {
+            1: "💬 메시지 삭제가 감지되었습니다.\n메시지 삭제는 자제해 주세요.",
+            2: "⚠️ 24시간 내 메시지 삭제 2회!\n계속 시 관리자에게 보고됩니다.",
+            3: "🚨 24시간 내 메시지 삭제 3회!\n관리자에게 보고되었습니다."
+        },
+        TRACKING_PERIOD_HOURS: 24  // 삭제 횟수 추적 기간 (시간)
     },
     
     // ========== 봇 설정 ==========
@@ -283,6 +325,297 @@ const PROFANITY_FILTER = {
     }
 };
 
+// ========== 무단 홍보 감지 시스템 ==========
+const PROMOTION_DETECTOR = {
+    // 위반 기록 (메모리 캐시, 실제 환경에서는 DB 사용 권장)
+    violations: new Map(),
+    
+    // URL 정규식
+    urlRegex: /https?:\/\/[^\s]+/gi,
+    
+    // URL 검사
+    checkMessage: function(msg, sender) {
+        if (!CONFIG.FEATURES.PROMOTION_DETECTION) {
+            return { detected: false };
+        }
+        
+        const urls = msg.match(this.urlRegex);
+        if (!urls || urls.length === 0) {
+            return { detected: false };
+        }
+        
+        // 각 URL 검사
+        for (const url of urls) {
+            const lowerUrl = url.toLowerCase();
+            
+            // 화이트리스트 도메인 체크
+            const isWhitelisted = CONFIG.PROMOTION_DETECTION.WHITELIST_DOMAINS.some(domain => 
+                lowerUrl.includes(domain)
+            );
+            if (isWhitelisted) continue;
+            
+            // 금지 도메인 체크
+            for (const bannedDomain of CONFIG.PROMOTION_DETECTION.BANNED_DOMAINS) {
+                if (lowerUrl.includes(bannedDomain)) {
+                    // 위반 유형 결정
+                    let banType = "링크 홍보";
+                    if (bannedDomain.includes("kakao")) banType = "오픈채팅 무단 홍보";
+                    else if (bannedDomain.includes("toss")) banType = "토스 무단 홍보";
+                    else if (bannedDomain.includes("discord")) banType = "디스코드 무단 홍보";
+                    
+                    return {
+                        detected: true,
+                        url: url,
+                        domain: bannedDomain,
+                        banType: banType
+                    };
+                }
+            }
+        }
+        
+        return { detected: false };
+    },
+    
+    // 위반 횟수 증가 및 반환
+    addViolation: function(senderId) {
+        const senderKey = String(senderId);
+        const current = this.violations.get(senderKey) || { count: 0, lastTime: 0 };
+        
+        // 24시간 이후면 리셋
+        const now = Date.now();
+        if (now - current.lastTime > 24 * 60 * 60 * 1000) {
+            current.count = 0;
+        }
+        
+        current.count += 1;
+        current.lastTime = now;
+        this.violations.set(senderKey, current);
+        
+        return current.count;
+    },
+    
+    // 경고 메시지 생성
+    getWarningMessage: function(sender, banType, count, url) {
+        const senderName = extractSenderName(sender);
+        const now = new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+        
+        let message = `⚠️ ${banType}가 감지되었습니다.\n`;
+        message += `📆 시간: ${now}\n`;
+        message += `👤 사용자: ${senderName}\n`;
+        message += `📌 무단 홍보 감지 ${count}회째입니다.\n`;
+        
+        if (count >= 3) {
+            message += `🚨 관리자 분들은 확인해주세요.`;
+        } else {
+            message += `관리자 분들은 가려주세요.`;
+        }
+        
+        return message;
+    }
+};
+
+// ========== 닉네임 변경 감지 시스템 ==========
+const NICKNAME_TRACKER = {
+    // 닉네임 기록 (메모리 캐시 - 실제 환경에서는 DB 사용)
+    nicknames: new Map(),
+    
+    // 닉네임 확인 및 변경 감지
+    checkAndUpdate: function(senderId, senderName, roomId) {
+        if (!CONFIG.FEATURES.NICKNAME_CHANGE_DETECTION) {
+            return { changed: false };
+        }
+        
+        if (!senderId || !senderName) {
+            return { changed: false };
+        }
+        
+        const key = `${roomId}_${senderId}`;
+        const previous = this.nicknames.get(key);
+        
+        // 첫 기록
+        if (!previous) {
+            this.nicknames.set(key, {
+                name: senderName,
+                history: [{ name: senderName, timestamp: new Date().toISOString() }]
+            });
+            console.log(`[닉네임] 첫 기록: ${senderName} (ID: ${senderId})`);
+            return { changed: false, isFirst: true };
+        }
+        
+        // 닉네임 변경 확인
+        if (previous.name !== senderName) {
+            const oldName = previous.name;
+            
+            // 히스토리 업데이트
+            previous.history.push({ name: senderName, timestamp: new Date().toISOString() });
+            previous.name = senderName;
+            this.nicknames.set(key, previous);
+            
+            console.log(`[닉네임 변경] ${oldName} -> ${senderName} (ID: ${senderId})`);
+            
+            return {
+                changed: true,
+                oldName: oldName,
+                newName: senderName,
+                history: previous.history
+            };
+        }
+        
+        return { changed: false };
+    },
+    
+    // 닉네임 변경 알림 메시지
+    getChangeMessage: function(oldName, newName) {
+        return `📛 닉네임 변경 감지\n` +
+               `이전 닉네임: ${oldName}\n` +
+               `현재 닉네임: ${newName}`;
+    }
+};
+
+// ========== 메시지 삭제 감지 시스템 ==========
+const MESSAGE_DELETE_TRACKER = {
+    // 삭제 기록 (userId -> 삭제 시간 배열)
+    deleteLogs: new Map(),
+    
+    // 삭제 기록 추가 및 횟수 반환
+    addDeleteLog: function(userId) {
+        if (!CONFIG.FEATURES.MESSAGE_DELETE_DETECTION) {
+            return 0;
+        }
+        
+        const userKey = String(userId);
+        const now = new Date();
+        const cutoff = new Date(now.getTime() - CONFIG.MESSAGE_DELETE_DETECTION.TRACKING_PERIOD_HOURS * 60 * 60 * 1000);
+        
+        // 기존 기록 가져오기
+        let logs = this.deleteLogs.get(userKey) || [];
+        
+        // 추적 기간 이전 기록 제거
+        logs = logs.filter(time => new Date(time) > cutoff);
+        
+        // 새 기록 추가
+        logs.push(now.toISOString());
+        this.deleteLogs.set(userKey, logs);
+        
+        return logs.length;
+    },
+    
+    // 경고 메시지 생성
+    getWarningMessage: function(senderName, count) {
+        const messages = CONFIG.MESSAGE_DELETE_DETECTION.WARNING_MESSAGES;
+        
+        if (count >= 3) {
+            return `🚨 ${senderName}님, 24시간 내 메시지 삭제 ${count}회!\n관리자에게 보고되었습니다.`;
+        } else if (count === 2) {
+            return `⚠️ ${senderName}님, 24시간 내 메시지 삭제 ${count}회!\n계속 시 관리자에게 보고됩니다.`;
+        } else {
+            return `💬 ${senderName}님, 메시지 삭제가 감지되었습니다.\n메시지 삭제는 자제해 주세요.`;
+        }
+    }
+};
+
+// ========== 입퇴장/강퇴 감지 시스템 ==========
+const MEMBER_TRACKER = {
+    // Feed 타입 상수 (DBManager 참고)
+    FEED_TYPES: {
+        INVITE: 1,        // 초대
+        LEAVE: 2,         // 퇴장
+        OPEN_CHAT_JOIN: 4, // 오픈채팅 입장
+        KICK: 6,          // 강퇴
+        PROMOTE: 11,      // 부방장 승급
+        DEMOTE: 12,       // 부방장 강등
+        DELETE: 14,       // 메시지 삭제
+        HANDOVER: 15      // 방장 위임
+    },
+    
+    // Feed 메시지 처리
+    processFeedMessage: function(feedType, feedData, roomName) {
+        const result = { handled: false, message: null, type: null };
+        
+        switch (feedType) {
+            case this.FEED_TYPES.KICK:
+                // 강퇴 감지 (활성화)
+                if (CONFIG.FEATURES.KICK_DETECTION) {
+                    result.handled = true;
+                    result.type = 'kick';
+                    
+                    const kickedUser = feedData?.member?.nickName || feedData?.kickedUser?.nickName || '알 수 없음';
+                    const kickedBy = feedData?.kicker?.nickName || feedData?.kickedBy?.name || '관리자';
+                    
+                    result.message = `⚠️ 강퇴 감지\n` +
+                        `${kickedBy}님이 ${kickedUser}님을 내보냈습니다.`;
+                    
+                    console.log(`[강퇴 감지] ${kickedBy} -> ${kickedUser} (방: ${roomName})`);
+                }
+                break;
+                
+            /* ========== 입퇴장 감지 (주석 처리) ==========
+            case this.FEED_TYPES.INVITE:
+                // 초대 감지
+                if (CONFIG.FEATURES.JOIN_LEAVE_DETECTION) {
+                    result.handled = true;
+                    result.type = 'invite';
+                    
+                    const inviter = feedData?.inviter?.nickName || '알 수 없음';
+                    const invitedUsers = feedData?.members?.map(m => m.nickName).join(', ') || '알 수 없음';
+                    
+                    result.message = `👋 ${inviter}님이 ${invitedUsers}님을 초대했습니다.`;
+                    console.log(`[초대 감지] ${inviter} -> ${invitedUsers} (방: ${roomName})`);
+                }
+                break;
+                
+            case this.FEED_TYPES.LEAVE:
+                // 퇴장 감지
+                if (CONFIG.FEATURES.JOIN_LEAVE_DETECTION) {
+                    result.handled = true;
+                    result.type = 'leave';
+                    
+                    const leaveUser = feedData?.member?.nickName || '알 수 없음';
+                    const isKicked = feedData?.kicked === true;
+                    
+                    if (isKicked) {
+                        result.message = `⚠️ ${leaveUser}님이 강퇴당했습니다.`;
+                    } else {
+                        result.message = `👋 ${leaveUser}님이 나갔습니다.`;
+                    }
+                    console.log(`[퇴장 감지] ${leaveUser} (강퇴: ${isKicked}) (방: ${roomName})`);
+                }
+                break;
+                
+            case this.FEED_TYPES.OPEN_CHAT_JOIN:
+                // 오픈채팅 입장 감지
+                if (CONFIG.FEATURES.JOIN_LEAVE_DETECTION) {
+                    result.handled = true;
+                    result.type = 'join';
+                    
+                    const joinUsers = feedData?.members?.map(m => m.nickName).join(', ') || '알 수 없음';
+                    
+                    result.message = `🎉 ${joinUsers}님이 입장했습니다.`;
+                    console.log(`[입장 감지] ${joinUsers} (방: ${roomName})`);
+                }
+                break;
+            ========== 입퇴장 감지 (주석 처리 끝) ========== */
+                
+            case this.FEED_TYPES.PROMOTE:
+                // 부방장 승급 (로그만)
+                console.log(`[권한 변경] 부방장 승급: ${feedData?.member?.nickName || '알 수 없음'} (방: ${roomName})`);
+                break;
+                
+            case this.FEED_TYPES.DEMOTE:
+                // 부방장 강등 (로그만)
+                console.log(`[권한 변경] 부방장 강등: ${feedData?.member?.nickName || '알 수 없음'} (방: ${roomName})`);
+                break;
+                
+            case this.FEED_TYPES.HANDOVER:
+                // 방장 위임 (로그만)
+                console.log(`[권한 변경] 방장 위임: ${feedData?.prevHost?.nickName || '알 수 없음'} -> ${feedData?.newHost?.nickName || '알 수 없음'} (방: ${roomName})`);
+                break;
+        }
+        
+        return result;
+    }
+};
+
 // ========== 공지 시스템 (DB 기반) ==========
 const NOTICE_SYSTEM = {
     // 스케줄 기반 공지 발송 체크 (DB 기반)
@@ -441,26 +774,168 @@ const NOTICE_SYSTEM = {
     }
 };
 
-// ========== 유틸리티 함수 ==========
+// ========== Phase 4: pending_attachment 캐시 ==========
+// 이미지 메시지와 질문 명령어를 연결하기 위한 캐시
+const PENDING_ATTACHMENT_CACHE = new Map();
+const ATTACHMENT_CACHE_TTL = 10 * 60 * 1000;  // 10분
 
-// 발신자 이름 추출 (sender가 user_id만 있으면 처리)
-function extractSenderName(sender) {
-    if (!sender) return null;
-    
-    // sender 형식: "닉네임/user_id" 또는 "user_id"
-    const parts = String(sender).split('/');
-    if (parts.length > 1) {
-        // "닉네임/user_id" 형식이면 닉네임 반환
-        return parts[0].trim();
+/**
+ * pending attachment 캐시에 이미지 저장
+ * @param {string} roomName - 채팅방 이름
+ * @param {string} senderId - 발신자 ID
+ * @param {string} imageUrl - 이미지 URL
+ */
+function setPendingAttachment(roomName, senderId, imageUrl) {
+    if (!roomName || !senderId || !imageUrl) {
+        return;
     }
     
-    // 숫자만 있으면 user_id로 판단하여 null 반환 (닉네임 없음)
-    if (/^\d+$/.test(String(sender).trim())) {
+    const key = `${roomName}|${senderId}`;
+    PENDING_ATTACHMENT_CACHE.set(key, {
+        imageUrl: imageUrl,
+        timestamp: Date.now()
+    });
+    
+    console.log(`[이미지 캐시] 저장: key=${key}, url=${imageUrl.substring(0, 50)}...`);
+}
+
+/**
+ * pending attachment 캐시에서 이미지 조회 및 삭제
+ * @param {string} roomName - 채팅방 이름
+ * @param {string} senderId - 발신자 ID
+ * @returns {string|null} 이미지 URL 또는 null
+ */
+function getAndClearPendingAttachment(roomName, senderId) {
+    if (!roomName || !senderId) {
         return null;
     }
     
-    // 그 외는 그대로 반환
-    return sender;
+    const key = `${roomName}|${senderId}`;
+    const cached = PENDING_ATTACHMENT_CACHE.get(key);
+    
+    if (!cached) {
+        return null;
+    }
+    
+    // TTL 체크
+    const age = Date.now() - cached.timestamp;
+    if (age > ATTACHMENT_CACHE_TTL) {
+        PENDING_ATTACHMENT_CACHE.delete(key);
+        console.log(`[이미지 캐시] 만료됨: key=${key}, age=${age}ms`);
+        return null;
+    }
+    
+    // 조회 후 삭제
+    PENDING_ATTACHMENT_CACHE.delete(key);
+    console.log(`[이미지 캐시] 조회 및 삭제: key=${key}, url=${cached.imageUrl.substring(0, 50)}...`);
+    
+    return cached.imageUrl;
+}
+
+/**
+ * 오래된 캐시 항목 정리 (주기적으로 호출)
+ */
+function cleanupPendingAttachmentCache() {
+    const now = Date.now();
+    let cleaned = 0;
+    
+    for (const [key, cached] of PENDING_ATTACHMENT_CACHE.entries()) {
+        const age = now - cached.timestamp;
+        if (age > ATTACHMENT_CACHE_TTL) {
+            PENDING_ATTACHMENT_CACHE.delete(key);
+            cleaned++;
+        }
+    }
+    
+    if (cleaned > 0) {
+        console.log(`[이미지 캐시] 정리 완료: ${cleaned}개 항목 삭제`);
+    }
+}
+
+// 주기적으로 캐시 정리 (5분마다)
+if (typeof setInterval !== 'undefined') {
+    setInterval(cleanupPendingAttachmentCache, 5 * 60 * 1000);
+}
+
+// ========== 유틸리티 함수 ==========
+
+/**
+ * 발신자 이름 추출 (Phase 1.2: json.sender_name 우선, fallback으로 sender 파싱)
+ * @param {object} json - 메시지 JSON 데이터 (optional)
+ * @param {string} sender - 기존 sender 필드 (하위 호환성)
+ * @returns {string|null} 발신자 이름
+ */
+function extractSenderName(json, sender) {
+    // json이 없거나 첫 번째 인자가 문자열이면 기존 방식 (하위 호환성)
+    if (!json || typeof json === 'string') {
+        sender = json || sender;
+        json = null;
+    }
+    
+    // 1. json.sender_name_decrypted 최우선 사용 (클라이언트에서 복호화된 값)
+    if (json && json.sender_name_decrypted) {
+        return json.sender_name_decrypted;
+    }
+    
+    // 2. json.sender_name 또는 json.senderName 사용 (하위 호환성)
+    if (json && (json.sender_name || json.senderName)) {
+        return json.sender_name || json.senderName;
+    }
+    
+    // 3. json.user_name 사용 (하위 호환성)
+    if (json && json.user_name) {
+        return json.user_name;
+    }
+    
+    // 2. fallback: sender 파싱
+    if (sender) {
+        const senderStr = String(sender);
+        const parts = senderStr.split('/');
+        
+        if (parts.length === 1) {
+            return /^\d+$/.test(senderStr.trim()) ? null : senderStr.trim();
+        }
+        
+        // 마지막 부분이 숫자면 나머지 전체를 닉네임으로
+        const lastPart = parts[parts.length - 1];
+        if (/^\d+$/.test(lastPart.trim())) {
+            return parts.slice(0, -1).join('/').trim();
+        }
+        
+        return senderStr.trim();
+    }
+    
+    return null;
+}
+
+/**
+ * 발신자 ID 추출 (Phase 1.2: json.sender_id 우선, fallback으로 sender 파싱)
+ * @param {object} json - 메시지 JSON 데이터 (optional)
+ * @param {string} sender - 기존 sender 필드 (하위 호환성)
+ * @returns {string|null} 발신자 ID
+ */
+function extractSenderId(json, sender) {
+    // json이 없거나 첫 번째 인자가 문자열이면 기존 방식 (하위 호환성)
+    if (!json || typeof json === 'string') {
+        sender = json || sender;
+        json = null;
+    }
+    
+    // 1. json.sender_id 우선 사용
+    if (json && (json.sender_id || json.senderId || json.userId)) {
+        return json.sender_id || json.senderId || json.userId;
+    }
+    
+    // 2. fallback: sender 파싱
+    if (sender) {
+        const parts = String(sender).split('/');
+        const lastPart = parts[parts.length - 1];
+        if (/^\d+$/.test(lastPart.trim())) {
+            return lastPart.trim();
+        }
+    }
+    
+    return null;
 }
 
 // 권한 체크
@@ -782,6 +1257,38 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         }
     }
     
+    // ========== 무단 홍보 감지 ==========
+    if (CONFIG.FEATURES.PROMOTION_DETECTION) {
+        const promotionResult = PROMOTION_DETECTOR.checkMessage(processedMsg, sender);
+        if (promotionResult.detected) {
+            const senderName = extractSenderName(sender);
+            const senderId = sender.includes('/') ? sender.split('/')[1] : null;
+            const count = PROMOTION_DETECTOR.addViolation(senderId || senderName);
+            const warningLevel = Math.min(count, 3);
+            const warningMessage = PROMOTION_DETECTOR.getWarningMessage(sender, promotionResult.banType, count, promotionResult.url);
+            
+            console.log(`[무단 홍보] 감지: ${promotionResult.banType}, URL=${promotionResult.url}, 횟수=${count}`);
+            replies.push(warningMessage);
+            
+            // DB에 저장
+            moderationLogger.savePromotionViolation({
+                roomName: room,
+                senderName: senderName,
+                senderId: senderId,
+                messageText: processedMsg,
+                detectedUrl: promotionResult.url,
+                violationType: promotionResult.banType.replace(/\s+/g, '_').toLowerCase(),
+                violationCount: count,
+                warningLevel: warningLevel
+            });
+            
+            // 3회 이상이면 관리자에게도 알림
+            if (count >= 3) {
+                console.log(`[무단 홍보] 🚨 3회 이상! 관리자 보고됨: ${senderName}`);
+            }
+        }
+    }
+    
     // ========== 신고 기능 처리 (답장 버튼 + !신고만으로 처리, 멘션 불필요) ==========
     const msgTrimmed = processedMsg.trim();
     const msgLower = msgTrimmed.toLowerCase();
@@ -790,7 +1297,7 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
     
     // !신고 명령어가 있으면 처리 (답장 버튼 필수)
     if (hasReportCommand) {
-        console.log('[신고] 신고 요청 감지:', { replyToMessageId, reporter: sender, message: msg });
+        console.log('[신고] ✅ 신고 요청 감지:', { replyToMessageId, reporter: sender, message: msg.trim() });
         
         // replyToMessageId가 필수 (답장 버튼을 눌러야 함)
         if (!replyToMessageId) {
@@ -817,12 +1324,13 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         const targetMessageId = replyToMessageId;
         
         // 신고 처리
-        console.log('[신고] 신고 요청 처리 시작:', {
-            replyToMessageId: targetMessageId,
-            reporter: sender,
-            reporterId: sender.includes('/') ? sender.split('/')[1] : null,
-            reportReason
-        });
+            console.log('[신고] 처리 시작:', {
+                replyToMessageId: targetMessageId,
+                reporter: sender,
+                reporterId: sender.includes('/') ? sender.split('/')[1] : null,
+                reportReason,
+                room: room
+            });
         
         try {
             const reportResult = await chatLogger.saveReport(
@@ -833,7 +1341,7 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
                 'general'
             );
             
-            console.log('[신고] 신고 처리 결과:', reportResult ? '성공' : '실패');
+            console.log('[신고] 처리 결과:', reportResult ? '✅ 성공' : '❌ 실패');
             
             if (reportResult) {
                 const successMessage = `✅ 신고 접수 완료!\n\n` +
@@ -916,6 +1424,18 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
         // 로그 기록 (닉네임과 user_id 모두 저장)
         await PROFANITY_FILTER.log(sender, msg, filterResult.reason, filterResult.word);
         
+        // DB에 비속어 경고 저장
+        const senderId = sender.includes('/') ? sender.split('/')[1] : null;
+        moderationLogger.saveProfanityWarning({
+            roomName: room,
+            senderName: senderName || sender,
+            senderId: senderId,
+            messageText: msg,
+            detectedWord: filterResult.word,
+            warningLevel: filterResult.level || 1,
+            warningCount: warningCount
+        });
+        
         // 비속어 메시지는 차단 (명령어만 처리, 일반 메시지는 무시)
         // return replies; // 주석 처리: 명령어도 처리 가능하도록
     }
@@ -956,7 +1476,7 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
             
             // ========== 연속 등록 제한 체크 (1시간 이내 같은 질문) ==========
             const questionSenderName = extractSenderName(sender);
-            const questionSenderId = sender.includes('/') ? sender.split('/')[1] : null;
+            const questionSenderId = extractSenderId(null, sender) || (sender.includes('/') ? sender.split('/')[1] : null);
             
             // 1시간 이내 같은 제목/내용의 질문 확인
             try {
@@ -1008,50 +1528,54 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
                 // 체크 실패해도 질문 작성은 계속 진행
             }
             
-            // ========== 직전 메시지 이미지 확인 (2분 이내, 같은 user_id) ==========
-            let previousMessageImage = null;
-            try {
-                // 최근 메시지 조회 (2분 이내)
-                const recentMessages = await chatLogger.getChatMessagesByPeriod(
-                    room,
-                    new Date(Date.now() - 2 * 60 * 1000).toISOString(), // 2분 이내
-                    new Date().toISOString(),
-                    10
-                );
-                
-                // 같은 사용자의 가장 최근 메시지 중 이미지가 있는 것 찾기 (user_id로 비교)
-                if (recentMessages && recentMessages.length > 0) {
-                    for (const msg of recentMessages) {
-                        // user_id로 비교 (더 정확함)
-                        const msgUserId = msg.user_id || (msg.sender_id ? msg.sender_id : null);
-                        const questionUserId = questionSenderId || null;
-                        
-                        // user_id가 있으면 user_id로 비교, 없으면 sender_name으로 비교
-                        const isSameUser = (msgUserId && questionUserId && msgUserId === questionUserId) ||
-                                          (!msgUserId && !questionUserId && msg.sender_name === questionSenderName);
-                        
-                        if (isSameUser && msg.has_image) {
-                            // message_attachments 테이블에서 이미지 URL 조회
-                            const db = require('./db/database');
-                            const { data: attachments } = await db.supabase
-                                .from('message_attachments')
-                                .select('attachment_url, attachment_type')
-                                .eq('message_id', msg.id)
-                                .eq('attachment_type', 'image')
-                                .limit(1)
-                                .single();
+            // Phase 4: 캐시에서 이미지 조회 (우선)
+            let previousMessageImage = getAndClearPendingAttachment(room, questionSenderId);
+            
+            // 캐시에서 못 찾으면 DB 조회 (fallback)
+            if (!previousMessageImage) {
+                try {
+                    // 최근 메시지 조회 (5분 이내)
+                    const recentMessages = await chatLogger.getChatMessagesByPeriod(
+                        room,
+                        new Date(Date.now() - 5 * 60 * 1000).toISOString(), // 5분 이내
+                        new Date().toISOString(),
+                        20
+                    );
+                    
+                    // 같은 사용자의 가장 최근 메시지 중 이미지가 있는 것 찾기 (user_id로 비교)
+                    if (recentMessages && recentMessages.length > 0) {
+                        for (const msg of recentMessages) {
+                            // user_id로 비교 (더 정확함)
+                            const msgUserId = msg.user_id || (msg.sender_id ? msg.sender_id : null);
+                            const questionUserId = questionSenderId || null;
                             
-                            if (attachments && attachments.attachment_url) {
-                                previousMessageImage = attachments.attachment_url;
-                                console.log('[네이버 카페] 직전 메시지 이미지 발견 (2분 이내, user_id 일치):', previousMessageImage);
-                                break;
+                            // user_id가 있으면 user_id로 비교, 없으면 sender_name으로 비교
+                            const isSameUser = (msgUserId && questionUserId && msgUserId === questionUserId) ||
+                                              (!msgUserId && !questionUserId && msg.sender_name === questionSenderName);
+                            
+                            if (isSameUser && msg.has_image) {
+                                // message_attachments 테이블에서 이미지 URL 조회
+                                const db = require('./db/db');
+                                const { data: attachments } = await db.supabase
+                                    .from('message_attachments')
+                                    .select('attachment_url')
+                                    .eq('message_id', msg.id)
+                                    .eq('attachment_type', 'image')
+                                    .limit(1)
+                                    .single();
+                                
+                                if (attachments && attachments.attachment_url) {
+                                    previousMessageImage = attachments.attachment_url;
+                                    console.log('[네이버 카페] 직전 메시지 이미지 발견 (DB 조회, 5분 이내, user_id 일치):', previousMessageImage);
+                                    break;
+                                }
                             }
                         }
                     }
+                } catch (error) {
+                    console.error('[네이버 카페] 직전 메시지 이미지 조회 실패:', error.message);
+                    // 이미지 조회 실패해도 질문 작성은 계속 진행
                 }
-            } catch (error) {
-                console.error('[네이버 카페] 직전 메시지 이미지 조회 실패:', error.message);
-                // 이미지 조회 실패해도 질문 작성은 계속 진행
             }
             
             // 환경변수 확인
@@ -1120,6 +1644,7 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
             // 네이버 카페 질문 서비스 호출
             const { submitQuestion, saveQuestionWithoutPermission } = require('./integrations/naverCafe/questionService');
             const senderName = extractSenderName(sender);
+            // questionSenderId와 previousMessageImage는 위에서 이미 선언됨 (중복 선언 방지)
             
             // headid는 항상 "단톡방질문" 문자열로 전달
             const finalHeadid = headid;
@@ -1129,6 +1654,24 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
             // Bridge APK가 접근성 fallback을 사용하여 알림 없이도 즉시 전송 가능
             console.log(`[네이버 카페] 질문 처리 시작: title="${title}", content="${content.substring(0, 30)}..."`);
             console.log(`[네이버 카페] API 호출 대기 중... (접근성 fallback으로 즉시 전송 예정)`);
+            
+            // 이미지 다운로드 및 변환 (URL인 경우)
+            let imageBuffers = null;
+            if (previousMessageImage) {
+                try {
+                    const axios = require('axios');
+                    console.log(`[네이버 카페] 이미지 다운로드 시작: ${previousMessageImage}`);
+                    const imageResponse = await axios.get(previousMessageImage, {
+                        responseType: 'arraybuffer',
+                        timeout: 10000 // 10초 타임아웃
+                    });
+                    imageBuffers = [Buffer.from(imageResponse.data)];
+                    console.log(`[네이버 카페] 이미지 다운로드 완료: ${imageBuffers[0].length} bytes`);
+                } catch (error) {
+                    console.error(`[네이버 카페] 이미지 다운로드 실패: ${error.message}`);
+                    // 이미지 다운로드 실패해도 질문 작성은 계속 진행
+                }
+            }
             
             try {
                 const result = await submitQuestion({
@@ -1140,7 +1683,8 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
                     accessToken: accessToken,
                     clubid: clubid,
                     menuid: menuid,
-                    headid: finalHeadid // 유효한 경우에만 전달
+                    headid: finalHeadid, // 유효한 경우에만 전달
+                    images: imageBuffers // 이미지 Buffer 배열 전달
                 });
                 
                 console.log(`[네이버 카페] API 호출 완료: success=${result.success}, error=${result.error || '없음'}`);
@@ -2481,5 +3025,21 @@ function setSendFollowUpMessage(fn) {
     sendFollowUpMessage = fn;
 }
 
-module.exports = { handleMessage, CONFIG, NOTICE_SYSTEM, setSendShortUrlMessage, setSendFollowUpMessage };
+module.exports = { 
+    handleMessage, 
+    CONFIG, 
+    NOTICE_SYSTEM, 
+    setSendShortUrlMessage, 
+    setSendFollowUpMessage,
+    // 새로 추가된 모듈들
+    PROMOTION_DETECTOR,
+    NICKNAME_TRACKER,
+    MESSAGE_DELETE_TRACKER,
+    MEMBER_TRACKER,
+    // Phase 4: 이미지 캐시 함수
+    setPendingAttachment,
+    getAndClearPendingAttachment,
+    extractSenderName,
+    extractSenderId
+};
 

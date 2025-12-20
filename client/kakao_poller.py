@@ -26,6 +26,12 @@ except ImportError:
 
 # ⚠️ 복호화 로직 모듈화 (절대 수정 금지)
 # 복호화 로직은 별도 모듈로 분리되어 있으며, 이 모듈은 절대 수정하지 않습니다.
+
+# Phase 2: attachment 복호화 모듈 변수 초기화 (기본값 설정)
+ATTACHMENT_DECRYPT_AVAILABLE = False
+decrypt_attachment = None
+ATTACHMENT_DECRYPT_WHITELIST = set()
+
 try:
     import sys
     import os
@@ -39,6 +45,18 @@ try:
         from kakaodecrypt import KakaoDecrypt
     except ImportError:
         KakaoDecrypt = None
+    # Phase 2: attachment 복호화 모듈 import
+    try:
+        from attachment_decrypt import decrypt_attachment as _decrypt_attachment, ATTACHMENT_DECRYPT_WHITELIST as _ATTACHMENT_DECRYPT_WHITELIST
+        ATTACHMENT_DECRYPT_AVAILABLE = True
+        decrypt_attachment = _decrypt_attachment
+        ATTACHMENT_DECRYPT_WHITELIST = _ATTACHMENT_DECRYPT_WHITELIST
+        print("[✓] attachment 복호화 모듈 로드 성공 (attachment_decrypt.py)")
+    except ImportError as e:
+        ATTACHMENT_DECRYPT_AVAILABLE = False
+        decrypt_attachment = None
+        ATTACHMENT_DECRYPT_WHITELIST = set()
+        print(f"[경고] attachment 복호화 모듈 로드 실패: {e}")
     print("[✓] 복호화 모듈 로드 성공 (kakao_decrypt_module.py)")
 except ImportError as e:
     print(f"[✗] 복호화 모듈 로드 실패: {e}")
@@ -46,6 +64,7 @@ except ImportError as e:
     CRYPTO_AVAILABLE = False
     KAKAODECRYPT_AVAILABLE = False
     KakaoDecrypt = None
+    # ATTACHMENT_DECRYPT_AVAILABLE은 이미 위에서 False로 초기화됨
     # 폴백 함수 정의 (에러 방지)
     def decrypt_message(*args, **kwargs):
         return None
@@ -81,9 +100,41 @@ DECRYPT_ENABLED = CRYPTO_AVAILABLE
 
 # ⚠️ 복호화 관련 상수 및 함수는 kakao_decrypt_module.py로 이동됨
 # 복호화 로직은 모듈에서 import하여 사용합니다.
-# 
-# ⚠️ 경고: 복호화 로직은 절대 수정하지 마세요!
-# 모든 복호화 관련 코드는 kakao_decrypt_module.py에 있으며, 이 파일은 절대 수정하면 안 됩니다.
+# 아래 코드는 레거시 호환성을 위해 주석 처리되었습니다.
+# 실제 사용은 kakao_decrypt_module.py의 함수들을 사용하세요.
+
+# (레거시 호환성: 채팅방 이름 복호화에서 사용하는 경우를 위해 일부 상수는 유지)
+# 하지만 실제 복호화 로직은 모듈에서 import하여 사용
+def incept(n):
+    """
+    Reimplementation of com.kakao.talk.dream.Projector.incept() from libdream.so
+    encType 31 (실제로는 830819)에 대한 특별한 처리
+    """
+    dict1 = ['adrp.ldrsh.ldnp', 'ldpsw', 'umax', 'stnp.rsubhn', 'sqdmlsl', 'uqrshl.csel', 'sqshlu', 'umin.usubl.umlsl', 'cbnz.adds', 'tbnz',
+             'usubl2', 'stxr', 'sbfx', 'strh', 'stxrb.adcs', 'stxrh', 'ands.urhadd', 'subs', 'sbcs', 'fnmadd.ldxrb.saddl',
+             'stur', 'ldrsb', 'strb', 'prfm', 'ubfiz', 'ldrsw.madd.msub.sturb.ldursb', 'ldrb', 'b.eq', 'ldur.sbfiz', 'extr',
+             'fmadd', 'uqadd', 'sshr.uzp1.sttrb', 'umlsl2', 'rsubhn2.ldrh.uqsub', 'uqshl', 'uabd', 'ursra', 'usubw', 'uaddl2',
+             'b.gt', 'b.lt', 'sqshl', 'bics', 'smin.ubfx', 'smlsl2', 'uabdl2', 'zip2.ssubw2', 'ccmp', 'sqdmlal',
+             'b.al', 'smax.ldurh.uhsub', 'fcvtxn2', 'b.pl']
+    dict2 = ['saddl', 'urhadd', 'ubfiz.sqdmlsl.tbnz.stnp', 'smin', 'strh', 'ccmp', 'usubl', 'umlsl', 'uzp1', 'sbfx',
+             'b.eq', 'zip2.prfm.strb', 'msub', 'b.pl', 'csel', 'stxrh.ldxrb', 'uqrshl.ldrh', 'cbnz', 'ursra', 'sshr.ubfx.ldur.ldnp',
+             'fcvtxn2', 'usubl2', 'uaddl2', 'b.al', 'ssubw2', 'umax', 'b.lt', 'adrp.sturb', 'extr', 'uqshl',
+             'smax', 'uqsub.sqshlu', 'ands', 'madd', 'umin', 'b.gt', 'uabdl2', 'ldrsb.ldpsw.rsubhn', 'uqadd', 'sttrb',
+             'stxr', 'adds', 'rsubhn2.umlsl2', 'sbcs.fmadd', 'usubw', 'sqshl', 'stur.ldrsh.smlsl2', 'ldrsw', 'fnmadd', 'stxrb.sbfiz',
+             'adcs', 'bics.ldrb', 'l1ursb', 'subs.uhsub', 'ldurh', 'uabd', 'sqdmlal']
+    word1 = dict1[n % len(dict1)]
+    word2 = dict2[(n+31) % len(dict2)]
+    return word1 + '.' + word2
+
+# PREFIXES: kakaodecrypt.py와 동일하게 구성 (테스트된 버전 사용)
+# 인덱스 30: incept(830819) = 'extr.ursra'
+# 인덱스 31: 'veil'
+KAKAO_PREFIXES = [
+    "", "", "12", "24", "18", "30", "36", "12", "48", "7", "35", "40",
+    "17", "23", "29", "isabel", "kale", "sulli", "van", "merry", "kyle",
+    "james", "maddux", "tony", "hayden", "paul", "elijah", "dorothy",
+    "sally", "bran", incept(830819), "veil"
+]
 
 def load_last_message_id():
     """마지막 메시지 ID 로드"""
@@ -363,55 +414,138 @@ def get_name_of_user_id(user_id):
                 pass
         
         # Iris 코드: getNameOfUserId - 신규 DB 방식 (open_chat_member 우선)
+        # 중요: 각 테이블에서 개별 조회하여 더 긴 문자열을 선택
         if has_open_chat_member:
             try:
-                sql = """
-                    WITH info AS (SELECT ? AS user_id)
-                    SELECT COALESCE(db2.open_chat_member.nickname, db2.friends.name) AS name,
-                           COALESCE(db2.open_chat_member.enc, db2.friends.enc) AS enc
-                    FROM info
-                    LEFT JOIN db2.open_chat_member ON db2.open_chat_member.user_id = info.user_id
-                    LEFT JOIN db2.friends ON db2.friends.id = info.user_id
-                """
-                cursor.execute(sql, (user_id_str,))
-                result = cursor.fetchone()
+                # 먼저 각 테이블에서 개별 조회 (전체 문자열 확인)
+                ocm_name = None
+                ocm_enc = None
+                friends_name = None
+                friends_enc = None
                 
-                if result and result[0]:
-                    encrypted_name = result[0]
-                    enc = result[1] if len(result) > 1 and result[1] is not None else 0
+                try:
+                    cursor.execute("SELECT nickname, enc FROM db2.open_chat_member WHERE user_id = ?", (user_id_str,))
+                    ocm_result = cursor.fetchone()
+                    if ocm_result:
+                        ocm_name = ocm_result[0]
+                        ocm_enc = ocm_result[1] if len(ocm_result) > 1 and ocm_result[1] is not None else 0
+                except Exception as e:
+                    print(f"[DB조회] open_chat_member 조회 오류: {e}")
+                
+                try:
+                    cursor.execute("SELECT name, enc FROM db2.friends WHERE id = ?", (user_id_str,))
+                    friends_result = cursor.fetchone()
+                    if friends_result:
+                        friends_name = friends_result[0]
+                        friends_enc = friends_result[1] if len(friends_result) > 1 and friends_result[1] is not None else 0
+                except Exception as e:
+                    print(f"[DB조회] friends 조회 오류: {e}")
+                
+                # [DB 조회 로그] 실제 DB에서 조회한 정보 출력
+                print(f"[DB조회] user_id={user_id_str}로 조회:")
+                if ocm_name:
+                    ocm_name_str = str(ocm_name)
+                    print(f"[DB조회]   open_chat_member: nickname 길이={len(ocm_name_str)}, 값=\"{ocm_name_str}\", enc={ocm_enc}")
+                else:
+                    print(f"[DB조회]   open_chat_member: 결과 없음")
+                if friends_name:
+                    friends_name_str = str(friends_name)
+                    print(f"[DB조회]   friends: name 길이={len(friends_name_str)}, 값=\"{friends_name_str}\", enc={friends_enc}")
+                else:
+                    print(f"[DB조회]   friends: 결과 없음")
+                print(f"[DB조회] MY_USER_ID={MY_USER_ID}")
+                
+                # 더 긴 문자열 선택 (복호화 성공률 높이기 위해)
+                encrypted_name = None
+                enc = 0
+                
+                if ocm_name and friends_name:
+                    # 둘 다 있으면 더 긴 것을 선택
+                    ocm_len = len(str(ocm_name))
+                    friends_len = len(str(friends_name))
+                    if ocm_len >= friends_len:
+                        encrypted_name = ocm_name
+                        enc = ocm_enc
+                        print(f"[DB조회] open_chat_member 선택 (더 긴 문자열): 길이={ocm_len}")
+                    else:
+                        encrypted_name = friends_name
+                        enc = friends_enc
+                        print(f"[DB조회] friends 선택 (더 긴 문자열): 길이={friends_len}")
+                elif ocm_name:
+                    encrypted_name = ocm_name
+                    enc = ocm_enc
+                    print(f"[DB조회] open_chat_member 선택 (유일한 값)")
+                elif friends_name:
+                    encrypted_name = friends_name
+                    enc = friends_enc
+                    print(f"[DB조회] friends 선택 (유일한 값)")
+                
+                if encrypted_name:
                     
                     # 암호화되어 있으면 복호화 시도 (Iris: KakaoDecrypt.decrypt(enc, encryptedName, Configurable.botId))
-                    if KAKAODECRYPT_AVAILABLE and MY_USER_ID and enc > 0:
+                    # 복호화 시도 조건: MY_USER_ID가 있고, 암호화된 문자열인 경우
+                    if KAKAODECRYPT_AVAILABLE and MY_USER_ID:
                         # base64로 보이는 경우 암호화된 것으로 간주
+                        # 짧은 문자열도 암호화일 수 있으므로 len > 5로 완화
                         is_base64_like = (isinstance(encrypted_name, str) and 
-                                        len(encrypted_name) > 10 and 
-                                        len(encrypted_name) % 4 == 0 and
+                                        len(encrypted_name) > 5 and
                                         all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in encrypted_name))
                         
                         if is_base64_like:
-                            # enc 후보: 조회한 enc, 31, 30
-                            enc_candidates = [enc, 31, 30]
-                            enc_candidates = list(dict.fromkeys(enc_candidates))
+                            # enc 후보: DB에서 조회한 enc가 있으면 우선 사용, 없으면 31, 30, 32 시도
+                            enc_candidates = []
+                            if enc > 0:
+                                enc_candidates.append(enc)
+                            # 기본 후보 추가 (enc가 없거나 실패 시)
+                            enc_candidates.extend([31, 30, 32])
+                            enc_candidates = list(dict.fromkeys(enc_candidates))  # 중복 제거
+                            
+                            print(f"[발신자] 복호화 시도: user_id={user_id}, MY_USER_ID={MY_USER_ID}, 암호화된 이름=\"{encrypted_name}\", enc 후보={enc_candidates}")
                             
                             for enc_try in enc_candidates:
                                 try:
                                     decrypt_user_id_int = int(MY_USER_ID)
                                     if decrypt_user_id_int > 0:
+                                        # KakaoDecrypt.decrypt(user_id, enc, cipher_b64)
                                         decrypted = KakaoDecrypt.decrypt(decrypt_user_id_int, enc_try, encrypted_name)
+                                        
                                         if decrypted and decrypted != encrypted_name:
-                                            # 유효한 텍스트인지 확인
+                                            # 유효한 텍스트인지 확인 (제어 문자 제외)
                                             has_control_chars = any(ord(c) < 32 and c not in '\n\r\t' for c in decrypted)
-                                            if not has_control_chars:
+                                            
+                                            # 복호화 결과가 너무 짧거나 제어 문자가 많으면 실패로 간주
+                                            if not has_control_chars and len(decrypted) > 0:
+                                                print(f"[발신자] ✅ 복호화 성공: user_id={user_id}, enc={enc_try}, \"{encrypted_name}\" -> \"{decrypted}\"")
+                                                print(f"[발신자] 복호화 결과 검증: 길이={len(decrypted)}, 제어문자={has_control_chars}")
                                                 conn.close()
                                                 return decrypted
-                                except:
+                                            else:
+                                                print(f"[발신자] 복호화 결과 무효: enc={enc_try}, 결과=\"{decrypted}\", 제어문자={has_control_chars}")
+                                except Exception as e:
+                                    print(f"[발신자] 복호화 시도 실패: enc={enc_try}, 오류={type(e).__name__}: {e}")
                                     continue
+                            
+                            # 모든 enc 후보 실패 시 로그 출력 (서버에서 복호화 시도 예정)
+                            print(f"[발신자] ❌ 클라이언트 복호화 실패 (모든 enc 후보 시도 완료), 서버로 암호화된 이름 전송: user_id={user_id}, DB에서 조회한 enc={enc}, MY_USER_ID={MY_USER_ID}")
+                            print(f"[발신자] 시도한 enc 후보: {enc_candidates}, 암호화된 이름=\"{encrypted_name}\" (서버에서 복호화 시도 예정)")
+                        else:
+                            print(f"[발신자] base64 형태가 아님 (암호화되지 않은 것으로 간주): \"{encrypted_name}\"")
                     
-                    # 복호화 실패하거나 암호화되지 않은 경우 원본 반환
+                    # 복호화 실패하거나 암호화되지 않은 경우 원본 반환 (서버에서 복호화 시도)
+                    print(f"[발신자] 암호화된 이름을 서버로 전송 (서버에서 복호화 시도 예정): \"{encrypted_name}\" (길이={len(str(encrypted_name))})")
                     conn.close()
                     return encrypted_name
+                else:
+                    # encrypted_name이 None인 경우
+                    print(f"[발신자] 이름 조회 실패: user_id={user_id}, open_chat_member와 friends 모두 결과 없음")
+                    conn.close()
+                    return None
             except Exception as e:
                 print(f"[발신자] open_chat_member 조회 오류: {e}")
+                import traceback
+                traceback.print_exc()
+                if conn:
+                    conn.close()
         else:
             # Iris 코드: 구 DB 방식 (friends 테이블만)
             try:
@@ -420,37 +554,72 @@ def get_name_of_user_id(user_id):
                     cursor.execute(sql, (user_id_str,))
                     result = cursor.fetchone()
                     
+                    # [DB 조회 로그] 실제 DB에서 조회한 정보 출력
+                    print(f"[DB조회] user_id={user_id_str}로 friends 테이블 조회:")
+                    if result:
+                        name_value = result[0] if result[0] else None
+                        enc_value = result[1] if len(result) > 1 else None
+                        name_str = str(name_value) if name_value else 'None'
+                        print(f"[DB조회]   결과: name 길이={len(name_str) if name_value else 0}, enc={enc_value}")
+                        print(f"[DB조회]   name 전체값: \"{name_str}\"")
+                    else:
+                        print(f"[DB조회]   결과 없음")
+                    print(f"[DB조회] MY_USER_ID={MY_USER_ID}")
+                    
                     if result and result[0]:
                         encrypted_name = result[0]
                         enc = result[1] if len(result) > 1 and result[1] is not None else 0
                         
                         # 암호화되어 있으면 복호화 시도
-                        if KAKAODECRYPT_AVAILABLE and MY_USER_ID and enc > 0:
+                        if KAKAODECRYPT_AVAILABLE and MY_USER_ID:
                             try:
+                                # base64로 보이는 경우 암호화된 것으로 간주 (길이 조건 완화)
                                 is_base64_like = (isinstance(encrypted_name, str) and 
-                                                len(encrypted_name) > 10 and 
-                                                len(encrypted_name) % 4 == 0 and
+                                                len(encrypted_name) > 5 and
                                                 all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in encrypted_name))
                                 
                                 if is_base64_like:
-                                    enc_candidates = [enc, 31, 30]
+                                    # enc 후보: DB에서 조회한 enc가 있으면 우선 사용, 없으면 31, 30, 32 시도
+                                    enc_candidates = []
+                                    if enc > 0:
+                                        enc_candidates.append(enc)
+                                    enc_candidates.extend([31, 30, 32])
                                     enc_candidates = list(dict.fromkeys(enc_candidates))
+                                    
+                                    print(f"[발신자] 복호화 시도 (friends): user_id={user_id}, MY_USER_ID={MY_USER_ID}, 암호화된 이름=\"{encrypted_name}\", enc 후보={enc_candidates}")
                                     
                                     for enc_try in enc_candidates:
                                         try:
                                             decrypt_user_id_int = int(MY_USER_ID)
                                             if decrypt_user_id_int > 0:
+                                                # KakaoDecrypt.decrypt(user_id, enc, cipher_b64)
                                                 decrypted = KakaoDecrypt.decrypt(decrypt_user_id_int, enc_try, encrypted_name)
+                                                
                                                 if decrypted and decrypted != encrypted_name:
+                                                    # 유효한 텍스트인지 확인
                                                     has_control_chars = any(ord(c) < 32 and c not in '\n\r\t' for c in decrypted)
-                                                    if not has_control_chars:
+                                                    
+                                                    if not has_control_chars and len(decrypted) > 0:
+                                                        print(f"[발신자] ✅ 복호화 성공 (friends): user_id={user_id}, enc={enc_try}, \"{encrypted_name}\" -> \"{decrypted}\"")
                                                         conn.close()
                                                         return decrypted
-                                        except:
+                                                    else:
+                                                        print(f"[발신자] 복호화 결과 무효 (friends): enc={enc_try}, 결과=\"{decrypted}\", 제어문자={has_control_chars}")
+                                        except Exception as e:
+                                            print(f"[발신자] 복호화 시도 실패 (friends): enc={enc_try}, 오류={type(e).__name__}: {e}")
                                             continue
-                            except:
-                                pass
+                                    
+                                    # 모든 enc 후보 실패 시 로그 출력 (서버에서 복호화 시도 예정)
+                                    print(f"[발신자] ❌ 클라이언트 복호화 실패 (friends, 모든 enc 후보 시도 완료), 서버로 암호화된 이름 전송: user_id={user_id}, DB에서 조회한 enc={enc}, MY_USER_ID={MY_USER_ID}")
+                                    print(f"[발신자] 시도한 enc 후보: {enc_candidates}, 암호화된 이름=\"{encrypted_name}\" (서버에서 복호화 시도 예정)")
+                                else:
+                                    print(f"[발신자] base64 형태가 아님 (friends, 암호화되지 않은 것으로 간주): \"{encrypted_name}\"")
+                            except Exception as e:
+                                print(f"[발신자] 복호화 처리 중 예외 (friends): {type(e).__name__}: {e}")
+                                import traceback
+                                traceback.print_exc()
                         else:
+                            print(f"[발신자] 암호화된 이름을 서버로 전송 (friends, 서버에서 복호화 시도 예정): \"{encrypted_name}\"")
                             conn.close()
                             return encrypted_name
             except Exception as e:
@@ -606,6 +775,8 @@ def get_new_messages():
                 select_columns.append("type")  # 메시지 타입 (반응 감지용)
             if "attachment" in available_columns:
                 select_columns.append("attachment")  # 첨부 정보 (반응 정보 포함 가능)
+            if "referer" in available_columns:
+                select_columns.append("referer")  # 답장 메시지 ID (referer 필드)
             
             # 쿼리 생성
             columns_str = ", ".join(select_columns)
@@ -810,6 +981,9 @@ def send_to_server(message_data, is_reaction=False):
     """
     global ws_connection, last_message_room
     
+    # msg_id 추출 (kakao_log_id용)
+    msg_id = message_data.get("_id") if isinstance(message_data, dict) else None
+    
     # 반응 메시지인 경우 바로 전송
     if is_reaction:
         # 반응 메시지는 이미 올바른 형식으로 구성되어 있음
@@ -869,26 +1043,44 @@ def send_to_server(message_data, is_reaction=False):
         # 발신자 이름 조회 (Iris 방식)
         user_id = message_data.get("user_id")
         sender_name = None
+        sender_name_encrypted = None  # 원본 암호화된 이름 (서버 복호화용)
+        sender_name_decrypted = None  # 클라이언트에서 복호화한 이름
         
-        # message_data에 이미 복호화된 이름이 있으면 우선 사용 (poll_messages에서 추가한 값)
-        sender_name_from_data = message_data.get("user_name") or message_data.get("sender_name")
-        if sender_name_from_data:
-            sender_name = sender_name_from_data
-            print(f"[발신자] message_data에서 복호화된 이름 사용: \"{sender_name}\"")
-        elif user_id:
-            # message_data에 없으면 여기서 조회
+        if user_id:
             # Iris 원본 코드: getChatInfo에서 getNameOfUserId 호출
             sender_name = get_name_of_user_id(user_id)
             if sender_name:
-                print(f"[발신자] 이름 조회 성공: user_id={user_id}, 이름=\"{sender_name}\"")
+                # sender_name이 암호화된 형태인지 확인 (복호화 실패한 경우)
+                is_encrypted_name = (isinstance(sender_name, str) and 
+                                   len(sender_name) > 10 and 
+                                   len(sender_name) % 4 == 0 and
+                                   all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in sender_name))
+                
+                if is_encrypted_name:
+                    # 복호화 실패 - 암호화된 원본 저장 (서버에서 복호화 시도)
+                    sender_name_encrypted = sender_name
+                    sender_name_decrypted = None
+                    print(f"[발신자] 클라이언트 복호화 실패, 서버로 암호화된 이름 전송 (서버에서 복호화 시도): user_id={user_id}, 암호화된 이름=\"{sender_name[:50]}...\"")
+                else:
+                    # 복호화 성공 - 복호화된 이름 저장
+                    sender_name_decrypted = sender_name
+                    sender_name_encrypted = None
+                    print(f"[발신자] 복호화 성공: user_id={user_id}, 이름=\"{sender_name}\"")
             else:
                 print(f"[발신자] 이름 조회 실패: user_id={user_id}, user_id만 사용")
         
-        # 발신자 값 결정: 이름이 있으면 "이름/user_id", 없으면 "user_id"
-        if sender_name:
-            sender = f"{sender_name}/{user_id}" if user_id else sender_name
+        # 발신자 값 결정: 복호화된 이름이 있으면 "이름/user_id", 없으면 "user_id"
+        # 서버 호환성을 위해 sender 필드에는 복호화된 이름 또는 암호화된 이름을 사용 (하위 호환성 유지)
+        if sender_name_decrypted:
+            sender = f"{sender_name_decrypted}/{user_id}" if user_id else sender_name_decrypted
+        elif sender_name_encrypted:
+            # 복호화 실패한 경우 암호화된 이름 사용 (서버에서 복호화 시도)
+            sender = f"{sender_name_encrypted}/{user_id}" if user_id else sender_name_encrypted
         else:
             sender = str(user_id) if user_id else ""
+        
+        # sender_id 명시적으로 추출 (Phase 1.1: 데이터 구조 표준화)
+        sender_id_for_transmission = str(user_id) if user_id else None
         
         message = str(message_data.get("message", ""))
         v_field = message_data.get("v")
@@ -1047,16 +1239,27 @@ def send_to_server(message_data, is_reaction=False):
         payload = {
             "type": "message",
             "room": room,  # 복호화된 채팅방 이름 또는 암호화된 이름 또는 ID
-            "sender": sender,
+            "sender": sender,  # 하위 호환성 유지 (기존 형식)
             "message": final_message,  # 복호화된 메시지 또는 원본
             "isGroupChat": True,  # 명시적으로 추가
             "json": {
                 **message_data,  # 원본 메시지 데이터
                 "chat_id": str(chat_id),  # chat_id를 문자열로 전송 (큰 숫자 손실 방지)
+                "_id": msg_id,  # 카카오톡 원본 logId (기존 필드)
+                "kakao_log_id": msg_id,  # ✅ Phase 1.1: 카카오톡 원본 logId 명시적 필드
+                "reply_to_message_id": message_data.get("reply_to_message_id"),  # 답장 메시지 ID
+                # 채팅방 이름 정보
                 "room_name": room_name_encrypted if room_name_encrypted else room_name_raw,  # 암호화된 채팅방 이름 (서버 복호화용)
                 "room_name_decrypted": room_name_decrypted,  # 클라이언트에서 복호화한 이름
                 "room_name_column": room_name_column,  # 채팅방 이름 컬럼명
-                "room_data": room_data.get('raw_data') if room_data else None  # 채팅방 원본 데이터
+                "room_data": room_data.get('raw_data') if room_data else None,  # 채팅방 원본 데이터
+                # 발신자 이름 정보 (Phase 1.1: 데이터 구조 표준화)
+                "sender_name": sender_name_decrypted,  # ✅ 정규화된 닉네임 (우선 사용)
+                "sender_id": sender_id_for_transmission,  # ✅ user_id 명시적 필드
+                "sender_name_decrypted": sender_name_decrypted,  # 하위 호환성 유지
+                "sender_name_encrypted": sender_name_encrypted,  # 원본 암호화된 발신자 이름 (서버 복호화용)
+                "user_name": sender_name_decrypted,  # 서버 호환성을 위한 별칭 (복호화된 이름)
+                "raw_sender": sender  # ✅ Phase 1.1: 원본 sender 문자열 (디버깅용)
             }
         }
         
@@ -1279,6 +1482,20 @@ def poll_messages():
                                 except (json.JSONDecodeError, TypeError, KeyError):
                                     # JSON 파싱 실패 시 기본값 사용
                                     pass
+                        
+                        # v 필드에서 origin 추출 (메시지 삭제 감지용)
+                        origin = None
+                        if v_field:
+                            try:
+                                if isinstance(v_field, str):
+                                    v_json = json.loads(v_field)
+                                    if isinstance(v_json, dict):
+                                        origin = v_json.get("origin")
+                                elif isinstance(v_field, dict):
+                                    origin = v_field.get("origin")
+                            except (json.JSONDecodeError, TypeError, KeyError):
+                                pass
+                        
                         if len(msg) >= 7:
                             kakao_user_id_raw = msg[6]
                             # userId=1 같은 잘못된 값 필터링 (1000보다 큰 값만 유효)
@@ -1301,23 +1518,100 @@ def poll_messages():
                             msg_type = msg[8]  # 메시지 타입
                         if len(msg) >= 10:
                             attachment = msg[9]  # 첨부 정보
+                        referer = None
+                        if len(msg) >= 11:
+                            referer = msg[10]  # referer 필드 (답장 메시지 ID)
+                        
+                        # Phase 2: attachment 복호화 (whitelist 기반)
+                        attachment_decrypted = None
+                        if ATTACHMENT_DECRYPT_AVAILABLE and decrypt_attachment:
+                            msg_type_str_for_decrypt = str(msg_type) if msg_type is not None else None
+                            if msg_type_str_for_decrypt in ATTACHMENT_DECRYPT_WHITELIST or msg_type in ATTACHMENT_DECRYPT_WHITELIST:
+                                attachment_decrypted = decrypt_attachment(
+                                    attachment,
+                                    enc_type,
+                                    MY_USER_ID,
+                                    msg_type_str_for_decrypt,
+                                    msg_id,
+                                    debug=True
+                                )
+                        
+                        # 답장 메시지 ID 추출 (referer 또는 복호화된 attachment.src_message)
+                        reply_to_message_id = None
+                        if referer:
+                            try:
+                                reply_to_message_id = int(referer) if referer else None
+                            except (ValueError, TypeError):
+                                pass
+                        
+                        # 복호화된 attachment에서 src_message 확인 (type 26 답장 메시지)
+                        if not reply_to_message_id and attachment_decrypted:
+                            if isinstance(attachment_decrypted, dict):
+                                # src_message 또는 logId 확인
+                                src_message_id = attachment_decrypted.get("src_message") or attachment_decrypted.get("logId")
+                                if src_message_id:
+                                    try:
+                                        reply_to_message_id = int(src_message_id) if src_message_id else None
+                                    except (ValueError, TypeError):
+                                        pass
+                        
+                        # fallback: 복호화되지 않은 attachment에서 확인 (기존 방식)
+                        if not reply_to_message_id and attachment and not attachment_decrypted:
+                            try:
+                                if isinstance(attachment, str):
+                                    attachment_json = json.loads(attachment)
+                                    if isinstance(attachment_json, dict):
+                                        # src_message 또는 logId 확인
+                                        src_message_id = attachment_json.get("src_message") or attachment_json.get("logId")
+                                        if src_message_id:
+                                            try:
+                                                reply_to_message_id = int(src_message_id) if src_message_id else None
+                                            except (ValueError, TypeError):
+                                                pass
+                            except (json.JSONDecodeError, TypeError, KeyError):
+                                pass
                         
                         # 반응(reaction) 메시지 처리
                         is_reaction = False
                         reaction_type = None
                         target_message_id = None
                         
+                        # msg_type_str 초기화 (항상 정의되도록)
+                        msg_type_str = str(msg_type) if msg_type is not None else None
+                        
+                        # 디버그: 모든 메시지의 타입 로깅 (반응 타입 파악용)
+                        if msg_type is not None:
+                            print(f"[DEBUG] 메시지 타입: msg_id={msg_id}, type={msg_type}, message={str(message)[:30] if message else 'None'}...")
+                        
                         # 1. type 컬럼에서 반응 타입 확인
-                        if msg_type:
-                            # 카카오톡 메시지 타입: 일반적으로 숫자로 저장됨
-                            # 반응 관련 타입: 71 (선물), 기타 반응 타입 확인 필요
+                        # 카카오톡 메시지 타입 (참고: Iris, DBManager)
+                        # - 1: 일반 텍스트
+                        # - 2: 사진
+                        # - 71: 선물
+                        # - 12: Feed (시스템 메시지 - 입퇴장, 강퇴, 반응 등)
+                        if msg_type and msg_type_str:
                             if isinstance(msg_type, (int, str)):
-                                msg_type_str = str(msg_type)
-                                # 반응 관련 타입 확인 (일반적으로 특정 숫자 범위)
-                                # 실제 타입 값은 카카오톡 버전에 따라 다를 수 있음
-                                if msg_type_str in ["71", "72", "73"]:  # 반응 관련 타입 (확인 필요)
+                                # 반응 관련 타입 확인 (더 넓은 범위)
+                                # 카카오톡 반응은 type 12 (Feed) 또는 70-79 범위일 수 있음
+                                reaction_types = ["70", "71", "72", "73", "74", "75", "76", "77", "78", "79"]
+                                feed_type = "12"  # Feed 타입 (반응 포함 가능)
+                                
+                                if msg_type_str in reaction_types:
                                     is_reaction = True
                                     reaction_type = "thumbs_up"  # 기본값
+                                    print(f"[반응 감지] type 컬럼에서 반응 감지: msg_type={msg_type_str}, msg_id={msg_id}")
+                                
+                                # Feed 타입 (12)에서 feedType 확인 (강퇴, 입퇴장 등)
+                                if msg_type_str == feed_type and attachment:
+                                    try:
+                                        feed_attach = json.loads(attachment) if isinstance(attachment, str) else attachment
+                                        if isinstance(feed_attach, dict) and "feedType" in feed_attach:
+                                            feed_type_val = feed_attach.get("feedType")
+                                            print(f"[Feed 감지] type=12, feedType={feed_type_val}, msg_id={msg_id}")
+                                            # feedType 값:
+                                            # 1: 초대, 2: 퇴장, 4: 오픈채팅 입장, 6: 강퇴, 11: 부방승급, 12: 부방강등, 14: 삭제, 15: 방장위임
+                                    except (json.JSONDecodeError, TypeError):
+                                        pass
                         
                         # 2. attachment 필드에서 반응 정보 확인
                         if attachment and not is_reaction:
@@ -1325,11 +1619,35 @@ def poll_messages():
                                 if isinstance(attachment, str):
                                     attachment_json = json.loads(attachment)
                                     if isinstance(attachment_json, dict):
-                                        # 반응 정보 확인
-                                        if "reaction" in attachment_json or "like" in attachment_json or "thumbs" in attachment_json:
-                                            is_reaction = True
-                                            reaction_type = attachment_json.get("reaction") or attachment_json.get("like") or attachment_json.get("thumbs") or "thumbs_up"
-                                            target_message_id = attachment_json.get("message_id") or attachment_json.get("target_id")
+                                        # 반응 정보 확인 - 다양한 필드명 지원
+                                        reaction_keys = ["reaction", "like", "thumbs", "emoji", "emoType", "react", "likeType"]
+                                        for rkey in reaction_keys:
+                                            if rkey in attachment_json:
+                                                is_reaction = True
+                                                reaction_type = attachment_json.get(rkey) or "thumbs_up"
+                                                break
+                                        
+                                        # 대상 메시지 ID 확인
+                                        if is_reaction:
+                                            target_message_id = attachment_json.get("message_id") or attachment_json.get("target_id") or attachment_json.get("logId") or attachment_json.get("src_logId")
+                                            
+                                            # 반응 이모지 타입 매핑
+                                            emoji_map = {
+                                                "0": "heart",      # ❤️
+                                                "1": "thumbs_up",  # 👍
+                                                "2": "check",      # ✅
+                                                "3": "surprised",  # 😱
+                                                "4": "sad",        # 😢
+                                                "heart": "heart",
+                                                "like": "thumbs_up",
+                                                "check": "check",
+                                                "wow": "surprised",
+                                                "sad": "sad"
+                                            }
+                                            if reaction_type in emoji_map:
+                                                reaction_type = emoji_map[reaction_type]
+                                            
+                                            print(f"[반응 감지] attachment에서 반응 감지: type={reaction_type}, target={target_message_id}")
                             except (json.JSONDecodeError, TypeError, KeyError):
                                 pass
                         
@@ -1345,6 +1663,8 @@ def poll_messages():
                         if is_reaction:
                             # 반응 정보를 서버로 전송
                             try:
+                                print(f"[반응 처리] 반응 메시지 감지: msg_id={msg_id}, type={msg_type}, reaction_type={reaction_type}, target={target_message_id}")
+                                
                                 # 발신자 이름 조회
                                 sender_name = get_name_of_user_id(user_id) if user_id else None
                                 sender = f"{sender_name}/{user_id}" if sender_name and user_id else (str(user_id) if user_id else "")
@@ -1353,7 +1673,7 @@ def poll_messages():
                                 room_data = get_chat_room_data(chat_id) if chat_id else None
                                 room_name_raw = room_data.get('name') if room_data else None
                                 
-                                # 반응 메시지 데이터 구성
+                                # 반응 메시지 데이터 구성 (Phase 2: 복호화된 attachment 포함)
                                 reaction_data = {
                                     "type": "reaction",
                                     "room": room_name_raw or str(chat_id) if chat_id else "",
@@ -1364,9 +1684,14 @@ def poll_messages():
                                         "message_id": msg_id,  # 반응 메시지 자체의 ID
                                         "chat_id": chat_id,
                                         "user_id": user_id,
-                                        "created_at": created_at
+                                        "created_at": created_at,
+                                        "msg_type": msg_type,  # 원본 메시지 타입 추가
+                                        "attachment": json.dumps(attachment_decrypted) if attachment_decrypted else attachment,  # Phase 2: 복호화된 attachment 우선
+                                        "attachment_decrypted": attachment_decrypted  # Phase 2: dict 형태
                                     }
                                 }
+                                
+                                print(f"[반응 전송] 서버로 전송 시도: sender={sender}, room={room_name_raw or str(chat_id)}, target={target_message_id or msg_id}")
                                 
                                 # 서버로 반응 정보 전송
                                 if send_to_server(reaction_data, is_reaction=True):
@@ -1378,6 +1703,8 @@ def poll_messages():
                                     sent_message_ids.discard(msg_id)
                             except Exception as e:
                                 print(f"[오류] 반응 정보 처리 실패: ID={msg_id}, 오류={e}")
+                                import traceback
+                                traceback.print_exc()
                                 sent_message_ids.add(msg_id)  # 오류 발생해도 처리된 것으로 표시
                             
                             continue  # 반응 메시지는 일반 메시지 처리 스킵
@@ -1413,27 +1740,22 @@ def poll_messages():
                             except (ValueError, TypeError):
                                 pass
                         
-                        # 발신자 이름 조회 및 복호화 (서버로 복호화된 이름 전송)
-                        sender_name_decrypted = None
-                        sender_name_encrypted = None
-                        if valid_user_id or valid_kakao_user_id:
-                            # user_id로 발신자 이름 조회 (복호화 포함)
-                            sender_name_result = get_name_of_user_id(valid_kakao_user_id if valid_kakao_user_id else valid_user_id)
-                            if sender_name_result:
-                                # get_name_of_user_id는 이미 복호화를 시도하므로, 결과가 복호화된 이름일 가능성이 높음
-                                # 하지만 여전히 암호화되어 있을 수도 있으므로 확인
-                                is_base64_like = (isinstance(sender_name_result, str) and 
-                                                len(sender_name_result) > 10 and 
-                                                len(sender_name_result) % 4 == 0 and
-                                                all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in sender_name_result))
-                                if is_base64_like:
-                                    # 여전히 암호화되어 있으면 서버에서 복호화하도록 원본 전송
-                                    sender_name_encrypted = sender_name_result
-                                    print(f"[발신자] 이름이 여전히 암호화되어 있음: {sender_name_result[:20]}...")
-                                else:
-                                    # 복호화된 이름
-                                    sender_name_decrypted = sender_name_result
-                                    print(f"[✓ 발신자] 복호화된 이름: \"{sender_name_decrypted}\"")
+                        # Phase 2: 복호화된 attachment 정보 추출
+                        has_image = False
+                        image_url = None
+                        if msg_type_str and msg_type_str in ["2", "12", "27"] and attachment_decrypted:
+                            has_image = True
+                            if isinstance(attachment_decrypted, dict):
+                                image_url = (attachment_decrypted.get("url") or 
+                                           attachment_decrypted.get("path") or 
+                                           attachment_decrypted.get("path_1") or
+                                           attachment_decrypted.get("thumbnailUrl") or
+                                           attachment_decrypted.get("xl") or 
+                                           attachment_decrypted.get("l") or 
+                                           attachment_decrypted.get("m") or 
+                                           attachment_decrypted.get("s"))
+                                if image_url:
+                                    print(f"[이미지 감지] ✅ 감지: url={image_url[:50] if image_url else None}...")
                         
                         message_data = {
                             "_id": msg_id,
@@ -1445,8 +1767,13 @@ def poll_messages():
                             "userId": valid_kakao_user_id if valid_kakao_user_id else valid_user_id,  # 발신자 user_id (서버 참고용, 유효성 검사 통과)
                             "myUserId": MY_USER_ID,  # 자신의 user_id (복호화에 사용)
                             "encType": enc_type,  # 암호화 타입 (기본값: 31)
-                            "user_name": sender_name_decrypted,  # 복호화된 발신자 이름 (우선 사용)
-                            "sender_name": sender_name_decrypted  # 복호화된 발신자 이름 (별칭)
+                            "reply_to_message_id": reply_to_message_id,  # 답장 메시지 ID (referer 또는 attachment.src_message)
+                            "origin": origin,  # 메시지 출처 (MSG, SYNCMSG, SYNCDLMSG 등) - 삭제 감지용
+                            "msg_type": msg_type,  # 메시지 타입 (Feed 감지용)
+                            "attachment": json.dumps(attachment_decrypted) if attachment_decrypted else attachment,  # Phase 2: 복호화된 attachment 우선
+                            "attachment_decrypted": attachment_decrypted,  # Phase 2: dict 형태 (서버에서 사용)
+                            "has_image": has_image,  # Phase 2: 이미지 여부
+                            "image_url": image_url  # Phase 2: 이미지 URL
                         }
                         
                         # 디버그: 잘못된 값이 필터링되었는지 확인

@@ -130,3 +130,8 @@ pm2 logs kakkaobot-server --lines 100
 3. 기능 테스트
 4. 오류 발생 시 위의 가이드 참고
 
+
+
+
+
+

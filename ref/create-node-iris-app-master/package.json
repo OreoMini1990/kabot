@@ -1,0 +1,56 @@
+{
+  "name": "create-node-iris-app",
+  "version": "1.6.45",
+  "description": "Create a KakaoTalk bot project using node-iris",
+  "author": "Tsuki-Chat",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "bin": {
+    "create-node-iris-app": "dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "templates/"
+  ],
+  "keywords": [
+    "kakao",
+    "kakaotalk",
+    "bot",
+    "iris",
+    "template",
+    "cli",
+    "generator"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Tsuki-Chat/create-node-iris-app.git"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "dev:simple": "nodemon --exec ts-node templates/simple/src/index.ts",
+    "dev:new-delete-member": "nodemon --exec ts-node templates/new-delete-member/src/index.ts",
+    "prepublishOnly": "npm run build",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "publish:public": "tsc && npm publish --access public"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.16.2",
+    "@tsuki-chat/node-iris": "^1.6.45",
+    "chalk": "^5.6.2",
+    "commander": "^14.0.1",
+    "fs-extra": "^11.3.1",
+    "inquirer": "^12.9.4",
+    "nodemon": "^3.1.10",
+    "ora": "^9.0.0",
+    "prisma": "^6.16.2"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.4",
+    "@types/node": "^22.18.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  }
+}

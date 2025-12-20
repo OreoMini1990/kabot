@@ -1,0 +1,79 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// 채팅방 정보 모델
+model Room {
+  id        String   @id @default(cuid())
+  roomId    String   @unique // 카카오 방 ID
+  name      String
+  type      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 관계
+  members    Member[] // 방 멤버들
+  activities MemberActivity[] // 방의 모든 활동 기록 (입퇴장 + 닉변)
+
+  @@map("rooms")
+}
+
+// 멤버 모델 (사용자 정보 + 멤버십 정보)
+model Member {
+  id        String   @id @default(cuid())
+  userId    String // 카카오톡 사용자 ID
+  roomId    String // 방 ID
+  nickname  String // 현재 닉네임
+  isActive  Boolean  @default(true) // 현재 방에 있는지 여부
+  joinedAt  DateTime @default(now()) // 최초 입장 시간
+  lastSeen  DateTime @default(now()) // 마지막 활동 시간
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 관계
+  room       Room             @relation(fields: [roomId], references: [roomId], onDelete: Cascade)
+  activities MemberActivity[] // 이 멤버의 활동 기록들
+
+  // 제약 조건
+  @@unique([userId, roomId]) // 한 방에 같은 사용자는 하나의 멤버십만
+  @@index([roomId, isActive]) // 방별 활성 멤버 조회용
+  @@index([userId, isActive]) // 사용자별 활성 방 조회용
+  @@index([userId]) // 사용자 ID로 조회
+  @@map("members")
+}
+
+// 멤버 활동 기록 모델 (입퇴장 + 닉네임 변경 통합)
+model MemberActivity {
+  id           String   @id @default(cuid())
+  userId       String // 카카오톡 사용자 ID
+  roomId       String // 카카오톡 방 ID
+  nickname     String // 활동 당시 닉네임
+  activityType String // "JOIN" | "LEAVE" | "NICKNAME_CHANGE"
+  timestamp    DateTime @default(now())
+
+  // 닉네임 변경 전용 필드 (닉네임 변경일 때만 사용)
+  oldNickname String? // 기존 닉네임 (NICKNAME_CHANGE일 때만)
+  newNickname String? // 새 닉네임 (NICKNAME_CHANGE일 때만)
+
+  // 관계
+  room   Room    @relation(fields: [roomId], references: [roomId], onDelete: Cascade)
+  member Member? @relation(fields: [userId, roomId], references: [userId, roomId], onDelete: Cascade)
+
+  // 통계용 인덱스
+  @@index([userId, roomId, timestamp]) // 사용자별 방별 시간순 조회
+  @@index([roomId, timestamp]) // 방별 시간순 조회
+  @@index([roomId, activityType, timestamp]) // 방별 활동 타입별 조회
+  @@map("member_activities")
+}

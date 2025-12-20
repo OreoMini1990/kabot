@@ -13,9 +13,10 @@ const { writeCafeArticle } = require('./cafeWrite');
  * @param {number} params.clubid - 카페 ID
  * @param {number} params.menuid - 게시판 메뉴 ID
  * @param {number} [params.headid] - 말머리 ID (선택사항)
+ * @param {Array<Buffer|string>} [params.images] - 이미지 파일 배열 (Buffer 또는 파일 경로)
  * @returns {Promise<Object>}
  */
-async function createQuestion({ title, content, accessToken, clubid, menuid, headid }) {
+async function createQuestion({ title, content, accessToken, clubid, menuid, headid, images }) {
     try {
         const result = await writeCafeArticle({
             subject: title,
@@ -23,7 +24,8 @@ async function createQuestion({ title, content, accessToken, clubid, menuid, hea
             clubid: clubid,
             menuid: menuid,
             accessToken: accessToken,
-            headid: headid
+            headid: headid,
+            images: images
         });
         
         return result;

@@ -60,3 +60,10 @@ Write-Host "   .env 파일의 PORT, SERVER_URL 확인" -ForegroundColor White
 
 Write-Host "`n=== 확인 완료 ===" -ForegroundColor Green
 
+
+
+
+
+
+
+

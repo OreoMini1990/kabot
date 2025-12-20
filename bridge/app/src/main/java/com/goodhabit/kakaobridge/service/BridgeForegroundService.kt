@@ -91,20 +91,27 @@ class BridgeForegroundService : Service() {
         Log.i(TAG, "  getInstance() != null: ${automationServiceInstance != null}")
         
         // 하이브리드 모드: RemoteInput 우선, 알림이 없으면 Accessibility로 fallback
+        // FeatureFlags 명시적으로 하이브리드 모드로 설정 (둘 다 활성화)
+        FeatureFlags.setAccessibilitySendEnabled(this, true)
+        FeatureFlags.setRemoteInputSendEnabled(this, true)
         Log.i(TAG, "═══════════════════════════════════════════════════════")
         Log.i(TAG, "HYBRID MODE: RemoteInput 우선, Accessibility fallback")
         Log.i(TAG, "  Strategy: Try RemoteInput first, fallback to Accessibility if no notification")
+        Log.i(TAG, "  FeatureFlags 설정:")
+        Log.i(TAG, "    isRemoteInputEnabled: ${FeatureFlags.isRemoteInputSendEnabled(this)}")
+        Log.i(TAG, "    isAccessibilityEnabled: ${FeatureFlags.isAccessibilitySendEnabled(this)}")
+        Log.i(TAG, "    isHybridMode: ${FeatureFlags.isHybridMode(this)}")
         Log.i(TAG, "═══════════════════════════════════════════════════════")
         
         // 두 sender 모두 초기화
         // 1. RemoteInputSender 초기화 (항상)
-        val notificationCache = NotificationActionCache()
-        remoteInputSender = RemoteInputSender(this, notificationCache)
+        // NotificationActionCache는 싱글톤이므로 직접 사용
+        remoteInputSender = RemoteInputSender(this, NotificationActionCache)
         Log.i(TAG, "✓ RemoteInputSender initialized")
         
         // 캐시 정리 태스크 시작
         serviceScope.launch {
-            cleanupCachePeriodically(notificationCache)
+            cleanupCachePeriodically(NotificationActionCache)
         }
         
         // 2. AccessibilitySender 초기화 (접근성 서비스가 활성화되어 있으면)
@@ -387,13 +394,23 @@ class BridgeForegroundService : Service() {
                     
                     Log.i(TAG, "  원본 파라미터:")
                     Log.i(TAG, "    id: \"$id\"")
-                    Log.i(TAG, "    roomKey (raw): \"$roomKey\"")
+                    Log.i(TAG, "    roomKey (raw): \"$roomKey\" (길이: ${roomKey.length})")
                     Log.i(TAG, "    text: \"${text.take(50)}${if (text.length > 50) "..." else ""}\"")
                     Log.i(TAG, "    imageUrl: ${imageUrl ?: "null"}")
 
                     // roomKey 정규화 (알림에서 추출한 roomKey와 매칭하기 위해)
+                    val originalRoomKey = roomKey
                     roomKey = normalizeRoomKey(roomKey)
-
+                    
+                    Log.i(TAG, "  roomKey 정규화:")
+                    Log.i(TAG, "    원본: \"$originalRoomKey\" (길이: ${originalRoomKey.length})")
+                    Log.i(TAG, "    정규화: \"$roomKey\" (길이: ${roomKey.length})")
+                    
+                    // 현재 캐시 상태 확인
+                    val notificationCache = (remoteInputSender as? com.goodhabit.kakaobridge.sender.RemoteInputSender)?.let {
+                        // RemoteInputSender의 notificationCache에 접근할 수 없으므로
+                        // 로그만 출력 (실제 캐시 확인은 RemoteInputSender에서 수행)
+                    }
                     Log.i(TAG, "═══════════════════════════════════════════════════════")
                     Log.i(TAG, "Processing send request:")
                     Log.i(TAG, "  id: $id")
@@ -508,9 +525,87 @@ class BridgeForegroundService : Service() {
         Log.i(TAG, "  roomKey: \"${request.roomKey}\"")
         Log.i(TAG, "  textLength: ${request.text.length}")
         Log.i(TAG, "  text: ${request.text.take(100)}${if (request.text.length > 100) "..." else ""}")
+        if (request.imageUrl != null) {
+            Log.i(TAG, "  ═══ IMAGE URL DETECTED: ${request.imageUrl} ═══")
+        }
         Log.i(TAG, "═══════════════════════════════════════════════════════")
         
-        // 1순위: RemoteInputSender 시도 (알림 리플라이)
+        // 이미지가 있는 경우: RemoteInputSender는 이미지 전송을 지원하지 않으므로
+        // 바로 AccessibilitySender 사용 (알림 리플라이 건너뛰기)
+        val hasImage = request.imageUrl != null && request.imageUrl!!.isNotBlank()
+        if (hasImage) {
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
+            Log.i(TAG, "⚠ 이미지 전송 요청 감지: RemoteInputSender 건너뛰기")
+            Log.i(TAG, "  RemoteInputSender는 이미지 전송을 지원하지 않으므로")
+            Log.i(TAG, "  바로 AccessibilitySender 사용")
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
+            
+            // AccessibilitySender로 바로 처리
+            val isAccessibilityEnabled = KakaoAutomationService.isServiceEnabled(this)
+            var automationServiceVar: KakaoAutomationService? = KakaoAutomationService.getInstance()
+            
+            if (isAccessibilityEnabled && automationServiceVar == null) {
+                Log.i(TAG, "AccessibilityService is enabled but not connected yet, waiting...")
+                repeat(3) {
+                    kotlinx.coroutines.delay(500)
+                    automationServiceVar = KakaoAutomationService.getInstance()
+                    if (automationServiceVar != null) {
+                        Log.i(TAG, "✓ AccessibilityService connected after wait")
+                        return@repeat
+                    }
+                }
+            }
+            
+            val automationService = automationServiceVar
+            if (isAccessibilityEnabled && automationService != null) {
+                if (accessibilitySender == null) {
+                    accessibilitySender = AccessibilitySender(this, automationService)
+                    Log.i(TAG, "✓ AccessibilitySender initialized for image sending")
+                }
+                
+                val imageSender = accessibilitySender
+                if (imageSender != null) {
+                    Log.i(TAG, "═══════════════════════════════════════════════════════")
+                    Log.i(TAG, "🚀 이미지 전송: Using AccessibilitySender 🚀")
+                    Log.i(TAG, "  imageUrl: ${request.imageUrl}")
+                    Log.i(TAG, "═══════════════════════════════════════════════════════")
+                    
+                    val imageResult = trySend(imageSender, request.roomKey, request.text, request.imageUrl)
+                    Log.i(TAG, "AccessibilitySender result: ${imageResult?.javaClass?.simpleName ?: "null"}")
+                    
+                    if (imageResult is com.goodhabit.kakaobridge.sender.SendResult.Success) {
+                        Log.i(TAG, "✓✓✓✓✓ IMAGE SENT SUCCESSFULLY via AccessibilitySender ✓✓✓✓✓")
+                        handleSendResult(imageResult, request, dao)
+                    } else {
+                        Log.e(TAG, "✗✗✗ IMAGE SEND FAILED via AccessibilitySender ✗✗✗")
+                        handleSendResult(imageResult, request, dao)
+                    }
+                    return
+                } else {
+                    Log.e(TAG, "✗ AccessibilitySender is null even though service is available")
+                    val updated = request.copy(
+                        status = SendStatus.FAILED_FINAL,
+                        updatedAt = System.currentTimeMillis(),
+                        errorMessage = "AccessibilitySender not initialized for image sending"
+                    )
+                    dao.update(updated)
+                    sendAck(request.id, "FAILED", "AccessibilitySender not initialized for image sending")
+                    return
+                }
+            } else {
+                Log.e(TAG, "✗ AccessibilityService is not enabled or not connected")
+                val updated = request.copy(
+                    status = SendStatus.FAILED_FINAL,
+                    updatedAt = System.currentTimeMillis(),
+                    errorMessage = "AccessibilityService not available for image sending"
+                )
+                dao.update(updated)
+                sendAck(request.id, "FAILED", "AccessibilityService not available for image sending")
+                return
+            }
+        }
+        
+        // 이미지가 없는 경우: RemoteInputSender 시도 (알림 리플라이)
         val primarySender = remoteInputSender ?: run {
             Log.e(TAG, "RemoteInputSender is null, cannot process request: id=${request.id}")
             val updated = request.copy(
@@ -525,14 +620,20 @@ class BridgeForegroundService : Service() {
         
         Log.i(TAG, "═══════════════════════════════════════════════════════")
         Log.i(TAG, "Step 1: Trying RemoteInputSender (notification reply)")
+        Log.i(TAG, "  request.roomKey: \"${request.roomKey}\" (길이: ${request.roomKey.length})")
+        Log.i(TAG, "  request.text: \"${request.text.take(50)}${if (request.text.length > 50) "..." else ""}\"")
         Log.i(TAG, "═══════════════════════════════════════════════════════")
         // RemoteInputSender는 이미지 전송을 지원하지 않으므로 text만 전달
         val firstResult = trySend(primarySender, request.roomKey, request.text, null)
-        Log.i(TAG, "RemoteInputSender result: ${firstResult?.javaClass?.simpleName ?: "null"}")
+        val resultType = firstResult?.javaClass?.simpleName ?: "null"
+        Log.i(TAG, "RemoteInputSender result type: $resultType")
+        if (firstResult is com.goodhabit.kakaobridge.sender.SendResult.WaitingNotification) {
+            Log.i(TAG, "  WaitingNotification reason: ${firstResult.reason}")
+        }
         
         // RemoteInputSender가 성공하면 완료
         if (firstResult is com.goodhabit.kakaobridge.sender.SendResult.Success) {
-            Log.i(TAG, "✓✓✓ RemoteInputSender succeeded - message sent via notification reply ✓✓✓")
+            Log.i(TAG, "✓✓✓✓✓ RemoteInputSender SUCCESS - 알림 리플라이로 전송 완료 ✓✓✓✓✓")
             handleSendResult(firstResult, request, dao)
             return
         }
@@ -540,8 +641,9 @@ class BridgeForegroundService : Service() {
         // WaitingNotification인 경우: 알림이 없음 → AccessibilitySender로 fallback
         if (firstResult is com.goodhabit.kakaobridge.sender.SendResult.WaitingNotification) {
             Log.i(TAG, "═══════════════════════════════════════════════════════")
-            Log.i(TAG, "⚠ RemoteInputSender returned WaitingNotification: ${firstResult.reason}")
-            Log.i(TAG, "  → No notification available, falling back to AccessibilitySender")
+            Log.i(TAG, "⚠⚠⚠ RemoteInputSender 실패: WaitingNotification ⚠⚠⚠")
+            Log.i(TAG, "  이유: ${firstResult.reason}")
+            Log.i(TAG, "  → 알림 리플라이 불가능, AccessibilitySender로 fallback")
             Log.i(TAG, "═══════════════════════════════════════════════════════")
             
             // 접근성 서비스 확인 및 초기화

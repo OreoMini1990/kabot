@@ -1,0 +1,32 @@
+{
+  "name": "{{PROJECT_NAME}}",
+  "version": "1.0.0",
+  "description": "{{PROJECT_DESCRIPTION}}",
+  "license": "ISC",
+  "author": "{{AUTHOR_NAME}}",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "nodemon --exec ts-node src/index.ts",
+    "deploy": "tsc && node dist/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@tsuki-chat/node-iris": "{{NODE_IRIS_VERSION}}",
+    "@prisma/client": "^6.16.2",
+    "dotenv": "^17.2.2",
+    "prisma": "^6.16.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.3",
+    "nodemon": "^3.1.10",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.2"
+  }
+}

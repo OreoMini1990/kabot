@@ -145,3 +145,10 @@ pm2 logs kakkaobot-server --lines 50
 
 
 
+
+
+
+
+
+
+

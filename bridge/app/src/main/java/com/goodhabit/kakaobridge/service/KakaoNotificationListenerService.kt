@@ -30,37 +30,101 @@ class KakaoNotificationListenerService : NotificationListenerService() {
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val notificationCache = NotificationActionCache()
+    // NotificationActionCache는 싱글톤이므로 직접 사용
     private lateinit var remoteInputSender: RemoteInputSender
     private var sendRequestDao: SendRequestDao? = null
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "Service created")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        Log.i(TAG, "[서비스 생성] KakaoNotificationListenerService.onCreate()")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
         
-        remoteInputSender = RemoteInputSender(this, notificationCache)
+        remoteInputSender = RemoteInputSender(this, NotificationActionCache)
         
         // Room DB 초기화는 Application 클래스에서 싱글톤으로 관리
         val db = com.goodhabit.kakaobridge.db.AppDatabase.getDatabase(this)
         sendRequestDao = db.sendRequestDao()
+        
+        Log.i(TAG, "  RemoteInputSender initialized")
+        Log.i(TAG, "  SendRequestDao initialized")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+    }
+    
+    override fun onListenerConnected() {
+        super.onListenerConnected()
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        Log.i(TAG, "[연결 성공] Notification Listener Service connected!")
+        
+        // 연결 상태 확인
+        try {
+            val activeNotificationsList = activeNotifications
+            val activeCount = activeNotificationsList?.size ?: 0
+            Log.i(TAG, "  현재 활성 알림 개수: $activeCount")
+            
+            // 카카오톡 알림 확인
+            val kakaoNotifications = activeNotificationsList?.filter { it.packageName == KAKAO_TALK_PACKAGE }
+            Log.i(TAG, "  카카오톡 알림 개수: ${kakaoNotifications?.size ?: 0}")
+            
+            if (activeCount > 0) {
+                Log.i(TAG, "  활성 알림 목록:")
+                activeNotificationsList?.forEach { sbn ->
+                    Log.i(TAG, "    - Package: ${sbn.packageName}, Key: ${sbn.key}")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "  활성 알림 조회 실패: ${e.message}", e)
+        }
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+    }
+    
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        Log.w(TAG, "═══════════════════════════════════════════════════════")
+        Log.w(TAG, "[연결 끊김] Notification Listener Service disconnected!")
+        Log.w(TAG, "  알림 권한이 비활성화되었을 수 있습니다.")
+        Log.w(TAG, "  설정 > 앱 > KakaoBridge > 알림 액세스 권한을 확인하세요.")
+        Log.w(TAG, "═══════════════════════════════════════════════════════")
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         super.onNotificationPosted(sbn)
         
-        // 접근성 기반 전송 방식일 때는 알림 처리가 필요 없음 (직접 UI 조작)
-        val sendMethod = FeatureFlags.getActiveSendMethod(this)
-        if (sendMethod == FeatureFlags.SendMethod.ACCESSIBILITY) {
-            Log.d(TAG, "Accessibility mode active, skipping notification processing")
+        // 모든 알림에 대해 로그 출력 (디버깅용) - Log.i로 변경하여 항상 출력되도록
+        Log.i(TAG, "[알림 수신] Package: ${sbn.packageName}, Key: ${sbn.key}")
+        
+        // 하이브리드 모드에서는 알림 캐싱이 필요하므로 항상 처리
+        // 단일 Accessibility 모드일 때만 스킵 (RemoteInput이 완전히 비활성화된 경우)
+        val isHybridMode = FeatureFlags.isHybridMode(this)
+        val isRemoteInputEnabled = FeatureFlags.isRemoteInputSendEnabled(this)
+        val isAccessibilityEnabled = FeatureFlags.isAccessibilitySendEnabled(this)
+        val isAccessibilityOnly = !isRemoteInputEnabled && isAccessibilityEnabled
+        
+        Log.i(TAG, "  FeatureFlags 상태:")
+        Log.i(TAG, "    isRemoteInputEnabled: $isRemoteInputEnabled")
+        Log.i(TAG, "    isAccessibilityEnabled: $isAccessibilityEnabled")
+        Log.i(TAG, "    isHybridMode: $isHybridMode")
+        Log.i(TAG, "    isAccessibilityOnly: $isAccessibilityOnly")
+        
+        if (isAccessibilityOnly) {
+            Log.i(TAG, "  → Accessibility-only mode active (RemoteInput disabled), skipping notification processing")
             return
+        }
+        
+        // 하이브리드 모드 또는 RemoteInput 모드: 알림 캐싱 필요
+        if (isHybridMode) {
+            Log.i(TAG, "  → Hybrid mode: caching notification for RemoteInput fallback")
+        } else if (isRemoteInputEnabled) {
+            Log.i(TAG, "  → RemoteInput mode: caching notification")
         }
         
         val packageName = sbn.packageName
         if (packageName != KAKAO_TALK_PACKAGE) {
+            Log.d(TAG, "  → 카카오톡 알림이 아님 (패키지: $packageName), 무시")
             return // 카카오톡 알림이 아니면 무시
         }
 
-        Log.d(TAG, "KakaoTalk notification posted: ${sbn.key}")
+        Log.i(TAG, "[카카오톡 알림] KakaoTalk notification posted: ${sbn.key}")
 
         // 1. roomKey 추출
         val roomKey = extractRoomKey(sbn)
@@ -69,33 +133,50 @@ class KakaoNotificationListenerService : NotificationListenerService() {
             return
         }
 
-        Log.d(TAG, "Extracted roomKey: $roomKey")
+        Log.i(TAG, "═══════════════════════════════════════════════════════")
+        Log.i(TAG, "[알림 수신] roomKey 추출 성공")
+        Log.i(TAG, "  추출된 roomKey: \"$roomKey\"")
+        Log.i(TAG, "  roomKey 길이: ${roomKey.length}")
+        Log.i(TAG, "  정규화된 roomKey: \"${normalizeRoomKey(roomKey)}\"")
 
         // 2. replyAction 찾기 및 캐싱
         val notification = sbn.notification
         val actions = notification.actions
         if (actions != null) {
-            for (action in actions) {
+            Log.i(TAG, "  actions 개수: ${actions.size}")
+            for (actionIndex in actions.indices) {
+                val action = actions[actionIndex]
                 val remoteInputs = action.remoteInputs
                 if (remoteInputs != null && remoteInputs.isNotEmpty() && action.actionIntent != null) {
                     // replyAction 발견
-                    Log.d(TAG, "Found replyAction for roomKey: $roomKey")
+                    Log.i(TAG, "  ✓ replyAction 발견: action[$actionIndex]")
+                    Log.i(TAG, "    remoteInputs 개수: ${remoteInputs.size}")
+                    remoteInputs.forEachIndexed { index, remoteInput ->
+                        Log.i(TAG, "      remoteInput[$index]: resultKey=${remoteInput.resultKey}, label=${remoteInput.label}")
+                    }
                     
                     // 기존 캐시가 있으면 시간만 갱신, 없으면 새로 생성
-                    val existingCache = notificationCache.getReplyAction(roomKey)
+                    val existingCache = NotificationActionCache.getReplyAction(roomKey)
                     if (existingCache != null) {
-                        Log.d(TAG, "Refreshing existing cache for roomKey: $roomKey")
-                        notificationCache.refreshCacheTime(roomKey)
+                        Log.i(TAG, "  → 기존 캐시 발견, 시간 갱신 및 업데이트: \"$roomKey\"")
+                        NotificationActionCache.refreshCacheTime(roomKey)
                         // PendingIntent가 변경되었을 수 있으므로 업데이트
-                        notificationCache.updateCache(roomKey, action.actionIntent, remoteInputs)
+                        NotificationActionCache.updateCache(roomKey, action.actionIntent, remoteInputs)
                     } else {
-                        Log.d(TAG, "Creating new cache for roomKey: $roomKey")
-                        notificationCache.updateCache(roomKey, action.actionIntent, remoteInputs)
+                        Log.i(TAG, "  → 새 캐시 생성: \"$roomKey\"")
+                        NotificationActionCache.updateCache(roomKey, action.actionIntent, remoteInputs)
                     }
                     
                     // 캐시 상태 로깅
-                    val cacheInfo = notificationCache.getCacheInfo()
-                    Log.d(TAG, "Cache status: totalEntries=${cacheInfo["totalEntries"]}")
+                    val cacheInfo = NotificationActionCache.getCacheInfo()
+                    Log.i(TAG, "  캐시 상태: totalEntries=${cacheInfo["totalEntries"]}")
+                    
+                    val allCachedKeys = NotificationActionCache.getAllCachedRoomKeys()
+                    Log.i(TAG, "  캐시된 roomKey 목록:")
+                    allCachedKeys.forEach { cachedKey ->
+                        Log.i(TAG, "    - \"$cachedKey\"")
+                    }
+                    Log.i(TAG, "═══════════════════════════════════════════════════════")
                     
                     // 3. 해당 roomKey로 대기 중인 전송 요청이 있으면 즉시 처리
                     serviceScope.launch {
@@ -313,10 +394,11 @@ class KakaoNotificationListenerService : NotificationListenerService() {
      * 접근성 방식일 때는 BridgeForegroundService에서 직접 처리합니다.
      */
     private suspend fun processPendingRequests(roomKey: String) {
-        // 접근성 기반 전송 방식일 때는 처리하지 않음
-        val sendMethod = FeatureFlags.getActiveSendMethod(this)
-        if (sendMethod == FeatureFlags.SendMethod.ACCESSIBILITY) {
-            Log.d(TAG, "Accessibility mode active, skipping notification-based processing")
+        // RemoteInput이 완전히 비활성화된 경우에만 처리하지 않음
+        // 하이브리드 모드에서는 알림 캐싱을 통해 RemoteInput 사용 가능
+        val isRemoteInputEnabled = FeatureFlags.isRemoteInputSendEnabled(this)
+        if (!isRemoteInputEnabled) {
+            Log.d(TAG, "RemoteInput disabled, skipping notification-based processing")
             return
         }
         

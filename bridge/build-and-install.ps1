@@ -4,7 +4,7 @@
 [CmdletBinding()]
 param(
     [switch]$Release,
-    [switch]$Debug,
+    [switch]$DebugBuild,
     [string]$DeviceId = ""
 )
 
@@ -31,8 +31,8 @@ if (-not $gradlewExists) {
 $gradleCmd = if (Test-Path "gradlew.bat") { ".\gradlew.bat" } else { ".\gradlew" }
 
 # 2. Determine build type
-# Default to Release if neither Debug nor Release is specified
-$buildType = if ($Debug.IsPresent) { 
+# Default to Release if neither DebugBuild nor Release is specified
+$buildType = if ($DebugBuild.IsPresent) { 
     "Debug" 
 } elseif ($Release.IsPresent) { 
     "Release" 
@@ -62,9 +62,22 @@ try {
 
 # 4. Check APK file path
 $apkPath = "app\build\outputs\apk\$($buildType.ToLower())\app-$($buildType.ToLower()).apk"
+# Try unsigned variant for release builds
+if (-not (Test-Path $apkPath) -and $buildType -eq "Release") {
+    $apkPath = "app\build\outputs\apk\$($buildType.ToLower())\app-$($buildType.ToLower())-unsigned.apk"
+}
 if (-not (Test-Path $apkPath)) {
     Write-Host "[FAIL] APK file not found: $apkPath" -ForegroundColor Red
-    exit 1
+    Write-Host "[INFO] Checking for alternative APK files..." -ForegroundColor Yellow
+    $altApks = Get-ChildItem -Path "app\build\outputs\apk\$($buildType.ToLower())\" -Filter "*.apk" -ErrorAction SilentlyContinue
+    if ($altApks) {
+        Write-Host "[INFO] Found APK files:" -ForegroundColor Yellow
+        $altApks | ForEach-Object { Write-Host "  - $($_.Name)" -ForegroundColor Gray }
+        $apkPath = $altApks[0].FullName
+        Write-Host "[INFO] Using: $apkPath" -ForegroundColor Cyan
+    } else {
+        exit 1
+    }
 }
 
 Write-Host "[INFO] APK path: $apkPath" -ForegroundColor Cyan
@@ -115,28 +128,43 @@ Write-Host "[INFO] Using ADB: $adbPath" -ForegroundColor Cyan
 
 # 6. Check ADB connection
 Write-Host "[3/4] Checking ADB connection..." -ForegroundColor Yellow
-try {
-    $adbCheck = & $adbPath devices 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "ADB not working properly."
-    }
-    
-    $devices = & $adbPath devices | Select-String -Pattern "device$" | Measure-Object
-    if ($devices.Count -eq 0) {
-        Write-Host "[WARN] No device connected" -ForegroundColor Yellow
-        Write-Host "[INFO] Make sure USB debugging is enabled and device is connected" -ForegroundColor Yellow
-        
-        $continue = Read-Host "Continue? (y/n)"
-        if ($continue -ne "y" -and $continue -ne "Y") {
-            exit 0
+# ADB daemon이 시작 중일 수 있으므로 여러 번 시도
+$maxRetries = 3
+$retryDelay = 2
+$adbWorking = $false
+
+for ($i = 1; $i -le $maxRetries; $i++) {
+    $adbCheck = & $adbPath devices 2>&1 | Out-String -ErrorAction SilentlyContinue
+    if ($LASTEXITCODE -eq 0 -or $adbCheck -match "daemon") {
+        # daemon이 시작 중이면 대기 후 재시도
+        if ($adbCheck -match "daemon not running" -and $i -lt $maxRetries) {
+            Write-Host "[INFO] ADB daemon starting, waiting ${retryDelay}s..." -ForegroundColor Cyan
+            Start-Sleep -Seconds $retryDelay
+            continue
         }
-    } else {
-        Write-Host "[OK] Connected devices: $($devices.Count)" -ForegroundColor Green
+        $adbWorking = $true
+        break
     }
-} catch {
-    Write-Host "[FAIL] ADB check failed: $_" -ForegroundColor Red
-    Write-Host "[INFO] Android SDK Platform Tools required" -ForegroundColor Yellow
-    exit 1
+    if ($i -lt $maxRetries) {
+        Write-Host "[INFO] ADB check failed, retrying ($i/$maxRetries)..." -ForegroundColor Yellow
+        Start-Sleep -Seconds $retryDelay
+    }
+}
+
+if (-not $adbWorking) {
+    Write-Host "[WARN] ADB may not be working properly, but continuing..." -ForegroundColor Yellow
+}
+
+# 디바이스 확인
+$devices = & $adbPath devices 2>&1 | Select-String -Pattern "device$" -ErrorAction SilentlyContinue
+if (-not $devices) {
+    Write-Host "[WARN] No device connected" -ForegroundColor Yellow
+    Write-Host "[INFO] Make sure USB debugging is enabled and device is connected" -ForegroundColor Yellow
+    Write-Host "[AUTO] Continuing anyway (automated mode)..." -ForegroundColor Cyan
+    # 자동화 모드에서는 계속 진행
+} else {
+    $deviceCount = ($devices | Measure-Object).Count
+    Write-Host "[OK] Connected devices: $deviceCount" -ForegroundColor Green
 }
 
 # 7. Install APK

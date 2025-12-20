@@ -116,3 +116,10 @@ if (trimmedMsg.toLowerCase().includes("질문")) {
 
 
 
+
+
+
+
+
+
+
