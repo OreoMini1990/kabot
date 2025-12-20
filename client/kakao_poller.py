@@ -1571,6 +1571,9 @@ def poll_messages():
                             except (json.JSONDecodeError, TypeError, KeyError):
                                 pass
                         
+                        # message_data에 reply_to_message_id 설정 (서버 전송용)
+                        # message_data는 나중에 생성되지만, 여기서 추출한 값을 사용할 수 있도록 로컬 변수에 저장
+                        
                         # 반응(reaction) 메시지 처리
                         is_reaction = False
                         reaction_type = None

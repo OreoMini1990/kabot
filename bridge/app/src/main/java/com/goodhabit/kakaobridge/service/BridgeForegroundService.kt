@@ -20,6 +20,7 @@ import com.goodhabit.kakaobridge.sender.RemoteInputSender
 import com.goodhabit.kakaobridge.sender.MessageSender
 import com.goodhabit.kakaobridge.accessibility.AccessibilitySender
 import com.goodhabit.kakaobridge.accessibility.KakaoAutomationService
+import com.goodhabit.kakaobridge.accessibility.AutomationResult
 import com.goodhabit.kakaobridge.config.FeatureFlags
 import com.goodhabit.kakaobridge.config.SelectorsConfig
 import com.goodhabit.kakaobridge.websocket.BridgeWebSocketClient
@@ -383,6 +384,53 @@ class BridgeForegroundService : Service() {
             Log.i(TAG, "═══════════════════════════════════════════════════════")
 
             when (type) {
+                "delete" -> {
+                    Log.i(TAG, "═══════════════════════════════════════════════════════")
+                    Log.i(TAG, "🗑️🗑️🗑️ type='delete' 메시지 처리 시작 🗑️🗑️🗑️")
+                    
+                    val roomKey = json.optString("roomKey")
+                    val messageText = json.optString("messageText")
+                    
+                    Log.i(TAG, "  파라미터:")
+                    Log.i(TAG, "    roomKey: \"$roomKey\"")
+                    Log.i(TAG, "    messageText: \"${messageText.take(50)}${if (messageText.length > 50) "..." else ""}\"")
+                    Log.i(TAG, "═══════════════════════════════════════════════════════")
+                    
+                    if (roomKey.isBlank() || messageText.isBlank()) {
+                        Log.e(TAG, "❌ 필수 파라미터 누락: roomKey=\"$roomKey\", messageText=\"$messageText\"")
+                        return
+                    }
+                    
+                    // AccessibilityService를 통한 메시지 삭제
+                    val automationService = KakaoAutomationService.getInstance()
+                    if (automationService == null) {
+                        Log.e(TAG, "❌ KakaoAutomationService 인스턴스를 찾을 수 없음")
+                        return
+                    }
+                    
+                    Log.i(TAG, "KakaoAutomationService.deleteMessage() 호출 중...")
+                    serviceScope.launch {
+                        val result = automationService.deleteMessage(roomKey, messageText)
+                        
+                        when (result) {
+                            is AutomationResult.Success -> {
+                                Log.i(TAG, "═══════════════════════════════════════════════════════")
+                                Log.i(TAG, "✅✅✅ 메시지 삭제 성공 ✅✅✅")
+                                Log.i(TAG, "═══════════════════════════════════════════════════════")
+                            }
+                            is AutomationResult.Failed -> {
+                                Log.e(TAG, "═══════════════════════════════════════════════════════")
+                                Log.e(TAG, "❌❌❌ 메시지 삭제 실패 ❌❌❌")
+                                Log.e(TAG, "  오류 코드: ${result.errorCode}")
+                                Log.e(TAG, "  이유: ${result.message}")
+                                Log.e(TAG, "═══════════════════════════════════════════════════════")
+                            }
+                            is AutomationResult.Timeout -> {
+                                Log.w(TAG, "⚠️ 메시지 삭제 타임아웃: ${result.message}")
+                            }
+                        }
+                    }
+                }
                 "send" -> {
                     Log.i(TAG, "═══════════════════════════════════════════════════════")
                     Log.i(TAG, "✓✓✓ type='send' 메시지 처리 시작 ✓✓✓")

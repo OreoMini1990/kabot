@@ -1027,6 +1027,20 @@ setSendFollowUpMessageFunction((roomKey, message) => {
 
 // labbot-node.js에 함수 전달
 const { setSendShortUrlMessage, setSendFollowUpMessage } = require('./labbot-node');
+
+// 백필 작업 주기적 실행 (5분마다)
+if (typeof setInterval !== 'undefined') {
+    setInterval(async () => {
+        try {
+            const chatLogger = require('./db/chatLogger');
+            await chatLogger.backfillAllPendingReplies();
+        } catch (err) {
+            console.error('[백필] 주기적 백필 작업 실패:', err.message);
+        }
+    }, 5 * 60 * 1000);  // 5분마다 실행
+    
+    console.log('[백필] 주기적 백필 작업 시작 (5분마다)');
+}
 setSendShortUrlMessage(sendShortUrlMessageFunction);
 setSendFollowUpMessage(sendFollowUpMessageFunction);
 
@@ -1286,17 +1300,22 @@ wss.on('connection', function connection(ws, req) {
             // targetMessageId는 kakao_log_id일 수 있으므로, 먼저 DB에서 실제 message id를 찾아야 함
             let actualMessageId = null;
             try {
-              const numericLogId = parseInt(targetMessageId);
-              if (!isNaN(numericLogId)) {
-                const db = require('./db/database');
-                const { data: messageByLogId } = await db.supabase
-                  .from('chat_messages')
-                  .select('id')
-                  .eq('kakao_log_id', numericLogId)
-                  .single();
-                if (messageByLogId) {
-                  actualMessageId = String(messageByLogId.id);
-                  console.log(`[반응 저장] kakao_log_id(${numericLogId})로 메시지 찾음: DB id=${actualMessageId}`);
+              // ✅ 숫자만 구성된 문자열인지 검증
+              const numericStr = String(targetMessageId).trim();
+              if (/^\d+$/.test(numericStr)) {
+                const numericLogId = parseInt(numericStr, 10);
+                if (!isNaN(numericLogId) && numericLogId > 0) {
+                  const db = require('./db/database');
+                  const { data: messageByLogId } = await db.supabase
+                    .from('chat_messages')
+                    .select('id')
+                    .eq('kakao_log_id', numericLogId)
+                    .eq('room_name', room || decryptedRoomName || '')  // ✅ room scope 제한 추가
+                    .maybeSingle();  // ✅ single() 대신 maybeSingle() 사용
+                  if (messageByLogId && messageByLogId.id) {
+                    actualMessageId = String(messageByLogId.id);
+                    console.log(`[반응 저장] kakao_log_id(${numericLogId})로 메시지 찾음: DB id=${actualMessageId}, room="${room || decryptedRoomName || ''}"`);
+                  }
                 }
               }
             } catch (err) {
@@ -1306,7 +1325,7 @@ wss.on('connection', function connection(ws, req) {
             // kakao_log_id로 찾지 못했으면 targetMessageId를 그대로 사용 (DB id일 수도 있음)
             const messageIdToSave = actualMessageId || String(targetMessageId);
             
-            await chatLogger.saveReaction(
+            const reactionSaveResult = await chatLogger.saveReaction(
               messageIdToSave,
               reactionType,
               reactorName,
@@ -1314,28 +1333,38 @@ wss.on('connection', function connection(ws, req) {
               isAdminReaction
             );
             
-            // 반응 상세 로그도 저장 (kakao_log_id 사용)
-            moderationLogger.saveReactionLog({
-              roomName: room,
-              targetMessageId: String(targetMessageId), // kakao_log_id 저장
-              targetMessageText: null,  // 대상 메시지 내용은 별도 조회 필요
-              reactorName: reactorName,
-              reactorId: reactorId,
-              reactionType: reactionType,
-              isAdminReaction: isAdminReaction
-            });
-            
-            console.log('[반응 저장] ✅ 성공:', {
-              message_id: targetMessageId,
-              reaction_type: reactionType,
-              reactor: reactorName,
-              reactor_id: reactorId,
-              is_admin: isAdminReaction,
-              room: room,
-              sender_original: sender
-            });
+            if (reactionSaveResult) {
+              // 반응 상세 로그도 저장 (kakao_log_id 사용)
+              await moderationLogger.saveReactionLog({
+                roomName: room,
+                targetMessageId: String(targetMessageId), // kakao_log_id 저장
+                targetMessageText: null,  // 대상 메시지 내용은 별도 조회 필요
+                reactorName: reactorName,
+                reactorId: reactorId,
+                reactionType: reactionType,
+                isAdminReaction: isAdminReaction
+              });
+              
+              console.log('[반응 저장] ✅ 성공:', {
+                db_id: messageIdToSave,
+                kakao_log_id: targetMessageId,
+                reaction_type: reactionType,
+                reactor: reactorName,
+                reactor_id: reactorId,
+                is_admin: isAdminReaction,
+                room: room,
+                saved_reaction_id: reactionSaveResult.id
+              });
+            } else {
+              console.warn('[반응 저장] ⚠️ saveReaction 반환값이 null (중복 또는 오류):', {
+                messageIdToSave,
+                targetMessageId,
+                reactionType,
+                reactorName
+              });
+            }
           } else {
-            console.warn('[반응 저장] ❌ 실패: targetMessageId 또는 reactorName 없음', {
+            console.warn('[반응 저장] ❌ 실패: targetMessageId 또는 reactorName/reactorId 없음', {
               targetMessageId,
               reactorName,
               reactorId,
@@ -1964,7 +1993,53 @@ wss.on('connection', function connection(ws, req) {
         const chatLogger = require('./db/chatLogger');
         
         // 메시지 메타데이터 추출
-        const replyToMessageId = json?.reply_to_message_id || json?.reply_to || json?.parent_message_id || null;
+        // reply 체계 개선: reply_to_kakao_log_id (원본)와 reply_to_message_id (DB id) 분리
+        const { extractReplyTarget } = require('./db/utils/attachmentExtractor');
+        
+        // 클라이언트에서 보내는 reply_to_message_id는 실제로 kakao_log_id
+        const replyToKakaoLogIdRaw = json?.reply_to_message_id || json?.reply_to || json?.parent_message_id || null;
+        
+        // attachment에서도 추출 시도 (단일 진실 소스 함수 사용)
+        const replyToKakaoLogIdFromAttachment = extractReplyTarget(
+            json?.attachment_decrypted || json?.attachment,
+            null,  // referer는 이미 위에서 확인
+            json?.msg_type || json?.type
+        );
+        
+        // 최종 reply_to_kakao_log_id (우선순위: 클라이언트 필드 > attachment 추출)
+        const replyToKakaoLogId = replyToKakaoLogIdRaw || replyToKakaoLogIdFromAttachment;
+        
+        // reply_to_kakao_log_id를 DB id로 변환 시도 (백필 가능하므로 실패해도 저장은 진행)
+        let replyToMessageId = null;
+        if (replyToKakaoLogId) {
+            try {
+                const { safeParseInt } = require('./db/utils/attachmentExtractor');
+                const numericLogId = safeParseInt(replyToKakaoLogId);
+                if (numericLogId) {
+                    const db = require('./db/database');
+                    const { data: replyToMessage } = await db.supabase
+                        .from('chat_messages')
+                        .select('id')
+                        .eq('kakao_log_id', numericLogId)
+                        .eq('room_name', decryptedRoomName || '')  // ✅ room scope로 제한
+                        .maybeSingle();  // ✅ single() 대신 maybeSingle() 사용
+                    
+                    if (replyToMessage && replyToMessage.id) {
+                        replyToMessageId = replyToMessage.id;
+                        if (process.env.DEBUG_REPLY_LINK === '1') {
+                            console.log(`[답장 링크] ✅ 즉시 변환 성공: kakao_log_id(${numericLogId}) → DB id(${replyToMessageId})`);
+                        }
+                    } else {
+                        if (process.env.DEBUG_REPLY_LINK === '1') {
+                            console.log(`[답장 링크] ⏳ 백필 필요: kakao_log_id(${numericLogId}), room="${decryptedRoomName || ''}"`);
+                        }
+                    }
+                }
+            } catch (err) {
+                console.warn('[답장 링크] 변환 실패 (백필에서 재시도):', err.message);
+            }
+        }
+        
         const threadId = json?.thread_id || json?.thread_message_id || null;
         let chatId = json?.chat_id || null;  // let으로 변경 (이후 재할당 필요)
         
@@ -1986,6 +2061,7 @@ wss.on('connection', function connection(ws, req) {
         // 메시지 저장 및 닉네임 변경 감지 (비동기, 에러가 나도 계속 진행)
         try {
           // Phase 1.3: raw_sender, kakao_log_id 전달
+          // reply 체계 개선: reply_to_kakao_log_id와 reply_to_message_id 분리
           const savedMessage = await chatLogger.saveChatMessage(
             decryptedRoomName || '',
             senderName || sender || '',
@@ -1993,11 +2069,14 @@ wss.on('connection', function connection(ws, req) {
             decryptedMessage || '',
             isGroupChat !== undefined ? isGroupChat : true,
             metadata,
-            replyToMessageId,
+            replyToMessageId,  // DB id (변환 성공 시)
+            replyToKakaoLogId,  // kakao_log_id (클라이언트에서 보내는 값)
             threadId,
             sender,  // raw_sender (원본 sender 문자열)
             json?._id || json?.kakao_log_id  // kakao_log_id
           );
+          
+          // 백필 작업은 saveChatMessage 내부에서 자동 처리됨
           
           // 이미지 첨부 정보 저장 (메시지 타입이 이미지인 경우)
           if (savedMessage && json) {
@@ -2008,52 +2087,54 @@ wss.on('connection', function connection(ws, req) {
               const imageTypes = [2, 12, 27, '2', '12', '27'];
               
               if (imageTypes.includes(msgType)) {
-                // Phase 2: attachment_decrypted 우선 사용 (복호화된 attachment)
-                let attachInfo = json.attachment_decrypted || null;
+                // Phase 2: attachment 추출 함수 사용 (단일 진실 소스)
+                const { extractImageUrl } = require('./db/utils/attachmentExtractor');
                 
-                // attachment_decrypted가 없으면 attachment 파싱 시도 (fallback)
-                if (!attachInfo && json.attachment) {
-                  const attachmentData = json.attachment;
-                  if (typeof attachmentData === 'string') {
-                    try {
-                      attachInfo = JSON.parse(attachmentData);
-                    } catch (e) {
-                      // 파싱 실패
-                      console.log(`[이미지 저장] attachment 파싱 실패: ${e.message}`);
+                // attachment_decrypted 우선 사용, 없으면 attachment
+                const attachmentData = json.attachment_decrypted || json.attachment || null;
+                const imageUrl = extractImageUrl(attachmentData, msgType);
+                
+                if (imageUrl) {
+                  // attachInfo는 metadata 저장용 (전체 attachment 정보)
+                  let attachInfo = null;
+                  if (json.attachment_decrypted && typeof json.attachment_decrypted === 'object') {
+                    attachInfo = json.attachment_decrypted;
+                  } else if (json.attachment) {
+                    if (typeof json.attachment === 'string') {
+                      try {
+                        attachInfo = JSON.parse(json.attachment);
+                      } catch (e) {
+                        // 파싱 실패 시 무시
+                      }
+                    } else if (typeof json.attachment === 'object') {
+                      attachInfo = json.attachment;
                     }
-                  } else if (typeof attachmentData === 'object') {
-                    attachInfo = attachmentData;
                   }
-                }
-                
-                if (attachInfo && typeof attachInfo === 'object') {
-                  // 이미지 URL 추출 (다양한 필드명 지원)
-                  const imageUrl = attachInfo.url || attachInfo.thumbnailUrl || 
-                                  attachInfo.path || attachInfo.path_1 ||
-                                  attachInfo.xl || attachInfo.l || attachInfo.m || attachInfo.s;
                   
-                  if (imageUrl) {
-                    await chatLogger.saveAttachment(
-                      savedMessage.id,
-                      'image',
-                      imageUrl,
-                      attachInfo.name || null,
-                      attachInfo.size || null,
-                      attachInfo.mime_type || 'image/jpeg',
-                      attachInfo.thumbnailUrl || null,
-                      attachInfo
-                    );
-                    console.log(`[이미지 저장] ✅ 성공: message_id=${savedMessage.id}, url=${imageUrl.substring(0, 50)}...`);
-                    
-                    // Phase 4: 캐시에 저장
-                    const { setPendingAttachment } = require('./labbot-node');
-                    const roomName = decryptedRoomName || '';
+                  await chatLogger.saveAttachment(
+                    savedMessage.id,
+                    'image',
+                    imageUrl,
+                    attachInfo?.name || null,
+                    attachInfo?.size || null,
+                    attachInfo?.mime_type || 'image/jpeg',
+                    attachInfo?.thumbnailUrl || null,
+                    attachInfo
+                  );
+                  console.log(`[이미지 저장] ✅ 성공: message_id=${savedMessage.id}, url=${imageUrl.substring(0, 50)}...`);
+                  
+                  // Phase 4: 캐시에 저장
+                  const { setPendingAttachment } = require('./labbot-node');
+                  const roomName = decryptedRoomName || '';
+                  if (senderId) {
                     setPendingAttachment(roomName, senderId, imageUrl);
                   } else {
-                    console.log(`[이미지 저장] ⚠️ 이미지 URL을 찾을 수 없음: msgType=${msgType}, attachInfo keys=${Object.keys(attachInfo).join(', ')}`);
+                    console.warn(`[이미지 저장] ⚠️ senderId가 없어 캐시 저장 스킵: message_id=${savedMessage.id}`);
                   }
                 } else {
-                  console.log(`[이미지 저장] ⚠️ attachment 정보 없음: msgType=${msgType}`);
+                  if (process.env.DEBUG_KAKAO_ATTACHMENT === '1') {
+                    console.log(`[이미지 저장] ⚠️ 이미지 URL 추출 실패: msgType=${msgType}, attachmentData 존재=${!!attachmentData}`);
+                  }
                 }
               }
             } catch (imgErr) {
@@ -2107,19 +2188,54 @@ wss.on('connection', function connection(ws, req) {
               });
               
               if (targetMessageId && reactorName) {
-                await chatLogger.saveReaction(
-                  targetMessageId,
+                // targetMessageId가 kakao_log_id일 수 있으므로 DB id 조회 시도
+                let actualMessageId = null;
+                try {
+                  // ✅ 숫자만 구성된 문자열인지 검증
+                  const numericStr = String(targetMessageId).trim();
+                  if (/^\d+$/.test(numericStr)) {
+                    const numericLogId = parseInt(numericStr, 10);
+                    if (!isNaN(numericLogId) && numericLogId > 0) {
+                      const db = require('./db/database');
+                      const { data: messageByLogId } = await db.supabase
+                        .from('chat_messages')
+                        .select('id')
+                        .eq('kakao_log_id', numericLogId)
+                        .eq('room_name', room || decryptedRoomName || '')  // ✅ room scope 제한 추가
+                        .maybeSingle();  // ✅ single() 대신 maybeSingle() 사용
+                      if (messageByLogId && messageByLogId.id) {
+                        actualMessageId = String(messageByLogId.id);
+                        console.log(`[반응 저장] kakao_log_id(${numericLogId})로 메시지 찾음: DB id=${actualMessageId}`);
+                      }
+                    }
+                  }
+                } catch (err) {
+                  console.warn('[반응 저장] kakao_log_id로 메시지 찾기 실패:', err.message);
+                }
+                
+                const messageIdToSave = actualMessageId || String(targetMessageId);
+                
+                const reactionSaveResult = await chatLogger.saveReaction(
+                  messageIdToSave,
                   reactionType,
                   reactorName,
                   reactorId,
                   isAdminReaction
                 );
-                console.log('[반응 저장] 성공:', {
-                  message_id: targetMessageId,
-                  reaction_type: reactionType,
-                  reactor: reactorName,
-                  is_admin: isAdminReaction
-                });
+                
+                if (reactionSaveResult) {
+                  console.log('[반응 저장] ✅ 성공:', {
+                    db_id: messageIdToSave,
+                    kakao_log_id: targetMessageId,
+                    reaction_type: reactionType,
+                    reactor: reactorName,
+                    reactor_id: reactorId,
+                    is_admin: isAdminReaction,
+                    saved_reaction_id: reactionSaveResult.id
+                  });
+                } else {
+                  console.warn('[반응 저장] ⚠️ saveReaction 반환값이 null (중복 또는 오류)');
+                }
               }
             } catch (err) {
               console.error('[반응 저장] 실패:', err.message);
@@ -2143,6 +2259,45 @@ wss.on('connection', function connection(ws, req) {
           console.log(`  replies[0]: ${JSON.stringify(replies[0]).substring(0, 200)}...`);
         } else {
           console.log(`  ⚠⚠⚠ replies가 비어있습니다! ⚠⚠⚠`);
+        }
+        
+        // 무단홍보 메시지 자동 삭제 명령 전송 (handleMessage 호출 후 확인)
+        const lastPromotionResult = global.lastPromotionResult;
+        if (lastPromotionResult && lastPromotionResult.shouldDelete) {
+          // Bridge APK 클라이언트 찾기
+          const bridgeClients = [];
+          if (wss && wss.clients) {
+            for (const client of wss.clients) {
+              if (client.readyState === WebSocket.OPEN && client.isBridge === true) {
+                bridgeClients.push(client);
+              }
+            }
+          }
+          
+          if (bridgeClients.length > 0) {
+            const deleteMessage = {
+              type: 'delete',
+              roomKey: lastPromotionResult.roomKey || decryptedRoomName || room || '',
+              messageText: lastPromotionResult.messageText || decryptedMessage || ''
+            };
+            
+            console.log(`[무단홍보 삭제] ═══════════════════════════════════════════════════════`);
+            console.log(`[무단홍보 삭제] 삭제 명령 전송: roomKey="${deleteMessage.roomKey}", messageText="${deleteMessage.messageText.substring(0, 50)}..."`);
+            
+            try {
+              bridgeClients[0].send(JSON.stringify(deleteMessage));
+              console.log(`[무단홍보 삭제] ✓✓✓ 삭제 명령 전송 성공 ✓✓✓`);
+            } catch (err) {
+              console.error(`[무단홍보 삭제] ✗✗✗ 삭제 명령 전송 실패 ✗✗✗`);
+              console.error(`[무단홍보 삭제]   오류: ${err.message}`);
+            }
+            console.log(`[무단홍보 삭제] ═══════════════════════════════════════════════════════`);
+          } else {
+            console.warn(`[무단홍보 삭제] ⚠ Bridge APK 클라이언트가 연결되어 있지 않음`);
+          }
+          
+          // 전역 변수 초기화
+          global.lastPromotionResult = null;
         }
         
         // 닉네임 변경 알림 추가 (있는 경우)
@@ -2609,6 +2764,17 @@ server.listen(PORT, '0.0.0.0', () => {
   }, 1800000); // 30분마다 체크 (1800000ms = 30분)
   
   console.log(`[${new Date().toISOString()}] 스케줄 공지 자동 체크 시작 (30분 간격)`);
+  
+  // 백필 작업 주기적 실행 (5분마다)
+  setInterval(async () => {
+    try {
+      await chatLogger.backfillAllPendingReplies();
+    } catch (err) {
+      console.error('[백필] 주기적 백필 작업 실패:', err.message);
+    }
+  }, 5 * 60 * 1000);  // 5분마다 실행
+  
+  console.log(`[${new Date().toISOString()}] 백필 작업 자동 실행 시작 (5분 간격)`);
 });
 
 // 종료 처리 (로그 스트림 닫기 포함)

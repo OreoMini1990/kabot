@@ -12,6 +12,7 @@ import android.view.accessibility.AccessibilityWindowInfo
 import com.goodhabit.kakaobridge.accessibility.state.AutomationStateMachine
 import com.goodhabit.kakaobridge.accessibility.state.AutomationState
 import com.goodhabit.kakaobridge.accessibility.util.UiNodeHelper
+import com.goodhabit.kakaobridge.accessibility.AutomationResult
 import com.goodhabit.kakaobridge.config.SelectorsConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -370,6 +371,145 @@ class KakaoAutomationService : AccessibilityService() {
             Log.e(TAG, "Failed to press HOME", e)
             false
         }
+    }
+    
+    /**
+     * 메시지 삭제
+     * 
+     * 프로세스:
+     * 1. 메시지 텍스트로 메시지 찾기
+     * 2. 메시지 길게 누르기
+     * 3. "삭제" 버튼 클릭
+     * 4. "모두에게서 삭제" 선택 확인 (이미 선택되어 있을 수 있음)
+     * 5. "확인" 버튼 클릭
+     */
+    suspend fun deleteMessage(roomKey: String, messageText: String): AutomationResult {
+        return sendMutex.withLock {
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
+            Log.i(TAG, "🗑️ 메시지 삭제 시작")
+            Log.i(TAG, "  roomKey: $roomKey")
+            Log.i(TAG, "  messageText: ${messageText.take(50)}...")
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
+            
+            try {
+                // 1. 카카오톡 실행 (필요한 경우)
+                if (!isKakaoTalkActive()) {
+                    Log.i(TAG, "카카오톡이 실행되지 않음, 실행 시도...")
+                    launchKakaoTalk()
+                    delay(2000) // 카카오톡 실행 대기
+                }
+                
+                // 2. 활성 루트 대기
+                val root = waitForActiveRoot(5000)
+                if (root == null) {
+                Log.e(TAG, "활성 루트를 찾을 수 없음")
+                return AutomationResult.Failed("TIMEOUT", "활성 루트를 찾을 수 없습니다")
+                }
+                
+                // 3. 메시지 텍스트로 메시지 찾기 (부분 일치)
+                Log.i(TAG, "메시지 찾는 중: \"${messageText.take(30)}...\"")
+                val messageNode = findNodeByTextContains(messageText)
+                
+                if (messageNode == null) {
+                    Log.w(TAG, "메시지를 찾을 수 없음")
+                    return AutomationResult.Failed("MESSAGE_NOT_FOUND", "메시지를 찾을 수 없습니다: ${messageText.take(30)}...")
+                }
+                
+                Log.i(TAG, "✓ 메시지 찾음")
+                
+                // 4. 메시지 길게 누르기
+                Log.i(TAG, "메시지 길게 누르는 중...")
+                val longClickResult = UiNodeHelper.longClickNode(messageNode)
+                if (!longClickResult) {
+                    Log.e(TAG, "메시지 길게 누르기 실패")
+                    return AutomationResult.Failed("LONG_CLICK_FAILED", "메시지 길게 누르기 실패")
+                }
+                
+                Log.i(TAG, "✓ 메시지 길게 누름")
+                delay(1000) // 메뉴 표시 대기
+                
+                // 5. "삭제" 버튼 찾기 및 클릭
+                Log.i(TAG, "\"삭제\" 버튼 찾는 중...")
+                val deleteButton = findNodeByText("삭제")
+                if (deleteButton == null) {
+                    Log.e(TAG, "\"삭제\" 버튼을 찾을 수 없음")
+                    pressBack() // 다이얼로그 닫기
+                    return AutomationResult.Failed("DELETE_BUTTON_NOT_FOUND", "\"삭제\" 버튼을 찾을 수 없습니다")
+                }
+                
+                Log.i(TAG, "✓ \"삭제\" 버튼 찾음, 클릭 중...")
+                val deleteClickResult = clickNode(deleteButton)
+                if (!deleteClickResult) {
+                    Log.e(TAG, "\"삭제\" 버튼 클릭 실패")
+                    pressBack()
+                    return AutomationResult.Failed("DELETE_BUTTON_CLICK_FAILED", "\"삭제\" 버튼 클릭 실패")
+                }
+                
+                Log.i(TAG, "✓ \"삭제\" 버튼 클릭됨")
+                delay(1000) // 삭제 다이얼로그 표시 대기
+                
+                // 6. "모두에게서 삭제" 라디오 버튼 확인 (이미 선택되어 있을 수 있음)
+                Log.i(TAG, "\"모두에게서 삭제\" 옵션 확인 중...")
+                val deleteForAll = findNodeByContentDescription("모두에게서 삭제")
+                if (deleteForAll != null) {
+                    // 라디오 버튼이 선택되어 있지 않으면 클릭
+                    val isChecked = deleteForAll.isChecked
+                    Log.i(TAG, "  \"모두에게서 삭제\" 선택 상태: $isChecked")
+                    if (!isChecked) {
+                        Log.i(TAG, "  \"모두에게서 삭제\" 선택 중...")
+                        val selectResult = clickNode(deleteForAll)
+                        if (!selectResult) {
+                            Log.w(TAG, "  \"모두에게서 삭제\" 선택 실패 (계속 진행)")
+                        } else {
+                            Log.i(TAG, "  ✓ \"모두에게서 삭제\" 선택됨")
+                        }
+                        delay(500)
+                    } else {
+                        Log.i(TAG, "  ✓ \"모두에게서 삭제\" 이미 선택됨")
+                    }
+                } else {
+                    Log.w(TAG, "  \"모두에게서 삭제\" 옵션을 찾을 수 없음 (계속 진행)")
+                }
+                
+                // 7. "확인" 버튼 찾기 및 클릭
+                Log.i(TAG, "\"확인\" 버튼 찾는 중...")
+                val confirmButton = findNodeByText("확인")
+                if (confirmButton == null) {
+                    Log.e(TAG, "\"확인\" 버튼을 찾을 수 없음")
+                    pressBack() // 다이얼로그 닫기
+                    return AutomationResult.Failed("CONFIRM_BUTTON_NOT_FOUND", "\"확인\" 버튼을 찾을 수 없습니다")
+                }
+                
+                Log.i(TAG, "✓ \"확인\" 버튼 찾음, 클릭 중...")
+                val confirmClickResult = clickNode(confirmButton)
+                if (!confirmClickResult) {
+                    Log.e(TAG, "\"확인\" 버튼 클릭 실패")
+                    pressBack()
+                    return AutomationResult.Failed("CONFIRM_BUTTON_CLICK_FAILED", "\"확인\" 버튼 클릭 실패")
+                }
+                
+                Log.i(TAG, "✓ \"확인\" 버튼 클릭됨")
+                delay(1000) // 삭제 완료 대기
+                
+                Log.i(TAG, "═══════════════════════════════════════════════════════")
+                Log.i(TAG, "✅✅✅ 메시지 삭제 성공 ✅✅✅")
+                Log.i(TAG, "═══════════════════════════════════════════════════════")
+                
+                return AutomationResult.Success
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "메시지 삭제 중 오류 발생", e)
+                return AutomationResult.Failed("EXCEPTION", "오류: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * 카카오톡이 활성 상태인지 확인
+     */
+    private fun isKakaoTalkActive(): Boolean {
+        val root = getActiveRoot()
+        return root != null && root.packageName == KAKAO_TALK_PACKAGE
     }
 }
 

@@ -245,7 +245,7 @@ async function ensureRoomMembership(roomId, userId, role = 'member') {
 /**
  * 채팅 메시지 저장
  */
-async function saveChatMessage(roomName, senderName, senderId, messageText, isGroupChat = true, metadata = null, replyToMessageId = null, threadId = null, rawSender = null, kakaoLogId = null) {
+async function saveChatMessage(roomName, senderName, senderId, messageText, isGroupChat = true, metadata = null, replyToMessageId = null, threadId = null, rawSender = null, kakaoLogId = null, replyToKakaoLogId = null) {
     try {
         // 정규화된 사용자 및 채팅방 조회/생성
         const user = await getOrCreateUser(roomName, senderName, senderId);
@@ -354,9 +354,170 @@ async function saveChatMessage(roomName, senderName, senderId, messageText, isGr
             console.error('[채팅 로그] 통계 업데이트 실패:', err.message);
         });
         
+        // 백필 작업: reply_to_kakao_log_id가 있는데 reply_to_message_id가 null인 경우 연결 시도
+        if (data && replyToKakaoLogId && !replyToMessageId) {
+            backfillReplyLink(data.id, roomName, replyToKakaoLogId).catch(err => {
+                console.error('[채팅 로그] 백필 작업 실패:', err.message);
+            });
+        }
+        
         return data;
     } catch (error) {
         console.error('[채팅 로그] 메시지 저장 중 오류:', error.message);
+        return null;
+    }
+}
+
+/**
+ * 답장 링크 백필 작업 (reply_to_kakao_log_id → reply_to_message_id)
+ * 새 메시지 저장 후 호출하거나 주기적으로 호출
+ * @param {number} messageId - 현재 저장된 메시지 ID
+ * @param {string} roomName - 채팅방 이름
+ * @param {number} replyToKakaoLogId - 답장 대상 메시지의 kakao_log_id
+ */
+async function backfillReplyLink(messageId, roomName, replyToKakaoLogId) {
+    try {
+        if (!replyToKakaoLogId || !roomName) {
+            return;
+        }
+        
+        // 안전한 숫자 파싱
+        const numericLogId = safeParseInt(replyToKakaoLogId);
+        if (!numericLogId) {
+            return;
+        }
+        
+        // 같은 room에서 kakao_log_id로 답장 대상 메시지 찾기
+        const { data: targetMessage, error } = await db.supabase
+            .from('chat_messages')
+            .select('id')
+            .eq('kakao_log_id', numericLogId)
+            .eq('room_name', roomName)  // ✅ room scope로 제한
+            .maybeSingle();  // ✅ single() 대신 maybeSingle() 사용
+        
+        if (error) {
+            console.warn(`[백필] 답장 대상 메시지 조회 실패: ${error.message}`);
+            return;
+        }
+        
+        if (targetMessage && targetMessage.id) {
+            // reply_to_message_id 업데이트
+            const { error: updateError } = await db.supabase
+                .from('chat_messages')
+                .update({ reply_to_message_id: targetMessage.id })
+                .eq('id', messageId)
+                .eq('reply_to_message_id', null);  // null인 경우만 업데이트
+            
+            if (updateError) {
+                console.warn(`[백필] 답장 링크 업데이트 실패: ${updateError.message}`);
+            } else {
+                console.log(`[백필] ✅ 답장 링크 연결 완료: message_id=${messageId}, reply_to_message_id=${targetMessage.id}, kakao_log_id=${numericLogId}`);
+            }
+        } else {
+            // 아직 답장 대상 메시지가 DB에 없음 (레이스 조건)
+            // 나중에 주기적 백필 작업에서 다시 시도됨
+            console.log(`[백필] 답장 대상 메시지 미발견 (레이스 조건): kakao_log_id=${numericLogId}, room="${roomName}"`);
+        }
+    } catch (error) {
+        console.error('[백필] 백필 작업 중 오류:', error.message);
+    }
+}
+
+/**
+ * 주기적 백필 작업: 모든 pending reply 링크를 재시도
+ * 서버 시작 시 또는 주기적으로 호출 (예: 5분마다)
+ */
+async function backfillAllPendingReplies() {
+    try {
+        // reply_to_kakao_log_id는 있지만 reply_to_message_id가 null인 메시지들 찾기
+        const { data: pendingMessages, error } = await db.supabase
+            .from('chat_messages')
+            .select('id, room_name, reply_to_kakao_log_id')
+            .not('reply_to_kakao_log_id', 'is', null)
+            .is('reply_to_message_id', null)
+            .limit(100);  // 한 번에 최대 100개 처리
+        
+        if (error) {
+            console.error('[백필] pending 메시지 조회 실패:', error.message);
+            return;
+        }
+        
+        if (!pendingMessages || pendingMessages.length === 0) {
+            return;
+        }
+        
+        console.log(`[백필] ${pendingMessages.length}개의 pending reply 링크 발견, 백필 시작...`);
+        
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (const msg of pendingMessages) {
+            try {
+                const numericLogId = safeParseInt(msg.reply_to_kakao_log_id);
+                if (!numericLogId) {
+                    continue;
+                }
+                
+                // 같은 room에서 답장 대상 메시지 찾기
+                const { data: targetMessage, error: findError } = await db.supabase
+                    .from('chat_messages')
+                    .select('id')
+                    .eq('kakao_log_id', numericLogId)
+                    .eq('room_name', msg.room_name)
+                    .maybeSingle();
+                
+                if (findError || !targetMessage) {
+                    failCount++;
+                    continue;
+                }
+                
+                // reply_to_message_id 업데이트
+                const { error: updateError } = await db.supabase
+                    .from('chat_messages')
+                    .update({ reply_to_message_id: targetMessage.id })
+                    .eq('id', msg.id)
+                    .eq('reply_to_message_id', null);
+                
+                if (updateError) {
+                    failCount++;
+                } else {
+                    successCount++;
+                }
+            } catch (e) {
+                failCount++;
+                console.error(`[백필] 메시지 ${msg.id} 처리 중 오류:`, e.message);
+            }
+        }
+        
+        if (successCount > 0 || failCount > 0) {
+            console.log(`[백필] 완료: 성공=${successCount}, 실패=${failCount}`);
+        }
+    } catch (error) {
+        console.error('[백필] 주기적 백필 작업 중 오류:', error.message);
+    }
+}
+
+/**
+ * 안전한 숫자 파싱 (parseInt 위험 방지)
+ * @param {any} value - 파싱할 값
+ * @returns {number|null} 파싱된 숫자 또는 null
+ */
+function safeParseInt(value) {
+    if (value === null || value === undefined) {
+        return null;
+    }
+    
+    const str = String(value).trim();
+    
+    // 숫자만 있는지 확인 (^[0-9]+$)
+    if (!/^\d+$/.test(str)) {
+        return null;
+    }
+    
+    try {
+        const num = parseInt(str, 10);
+        return (num > 0) ? num : null;
+    } catch (e) {
         return null;
     }
 }
@@ -465,16 +626,30 @@ async function updateUserStatistics(roomName, senderName, senderId, wordCount, c
 
 /**
  * 반응 저장
+ * 개선: reactorName 의존 제거, reactor_user_id (또는 reactor_id) 중심으로 저장
+ * @param {number} messageId - 메시지 DB id
+ * @param {string} reactionType - 반응 타입 (예: 'thumbs_up', 'heart')
+ * @param {string|null} reactorName - 반응자 이름 (부가정보, 없어도 저장 가능)
+ * @param {string|null} reactorId - 반응자 ID (필수 권장)
+ * @param {boolean} isAdminReaction - 관리자 반응 여부
  */
 async function saveReaction(messageId, reactionType, reactorName, reactorId, isAdminReaction = false) {
     try {
+        // reactor_id가 없으면 경고 (하지만 저장은 진행)
+        if (!reactorId) {
+            console.warn('[반응 저장] ⚠️ reactor_id가 없음: reactorName=', reactorName, ', messageId=', messageId);
+        }
+        
+        // reactor_name이 없으면 null로 저장 (reactor_id로 식별)
+        const finalReactorName = reactorName || null;
+        
         const { data, error } = await db.supabase
             .from('chat_reactions')
             .insert({
                 message_id: messageId,
                 reaction_type: reactionType,
-                reactor_name: reactorName,
-                reactor_id: reactorId || null,
+                reactor_name: finalReactorName,  // null 가능
+                reactor_id: reactorId || null,  // 필수 권장, 없으면 null
                 is_admin_reaction: isAdminReaction
             })
             .select()
@@ -483,16 +658,31 @@ async function saveReaction(messageId, reactionType, reactorName, reactorId, isA
         if (error) {
             // 중복 반응인 경우 무시
             if (error.code === '23505') { // unique_violation
+                if (process.env.DEBUG_REACTION === '1') {
+                    console.log('[반응 저장] 중복 반응 (무시):', { messageId, reactionType, reactorName: finalReactorName, reactorId });
+                }
                 return null;
             }
-            console.error('[채팅 로그] 반응 저장 실패:', error.message);
+            console.error('[채팅 로그] 반응 저장 실패:', error.message, error.code);
             return null;
         }
         
-        // 반응 통계 업데이트 (비동기)
-        updateReactionStatistics(messageId, reactorName, isAdminReaction).catch(err => {
-            console.error('[채팅 로그] 반응 통계 업데이트 실패:', err.message);
-        });
+        // 반응 통계 업데이트 (비동기, reactorName이 있어도 없어도 처리)
+        if (finalReactorName) {
+            updateReactionStatistics(messageId, finalReactorName, isAdminReaction).catch(err => {
+                console.error('[채팅 로그] 반응 통계 업데이트 실패:', err.message);
+            });
+        }
+        
+        if (process.env.DEBUG_REACTION === '1') {
+            console.log('[반응 저장] ✅ 성공:', { 
+                id: data.id, 
+                messageId, 
+                reactionType, 
+                reactorName: finalReactorName, 
+                reactorId 
+            });
+        }
         
         return data;
     } catch (error) {
@@ -1178,6 +1368,15 @@ async function saveReport(reportedMessageId, reporterName, reporterId, reportRea
     }
 }
 
+// 주기적 백필 작업 시작 (5분마다)
+if (typeof setInterval !== 'undefined') {
+    setInterval(() => {
+        backfillAllPendingReplies().catch(err => {
+            console.error('[백필] 주기적 백필 작업 오류:', err.message);
+        });
+    }, 5 * 60 * 1000);  // 5분마다
+}
+
 module.exports = {
     getOrCreateUser,
     getOrCreateRoom,
@@ -1194,6 +1393,8 @@ module.exports = {
     getUserChatStatistics,
     getMostReactedUser,
     searchMessagesByKeyword,
-    aggregateUserStatistics
+    aggregateUserStatistics,
+    backfillReplyLink,
+    backfillAllPendingReplies
 };
 

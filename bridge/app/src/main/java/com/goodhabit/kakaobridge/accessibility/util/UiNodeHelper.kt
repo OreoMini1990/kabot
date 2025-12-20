@@ -160,6 +160,55 @@ object UiNodeHelper {
     }
     
     /**
+     * 노드 길게 누르기 (Long Click)
+     */
+    fun longClickNode(node: AccessibilityNodeInfo?): Boolean {
+        if (node == null) {
+            Log.w(TAG, "Cannot long click: node is null")
+            return false
+        }
+        
+        return try {
+            // 1순위: 노드 자체가 길게 누르기 가능하면 실행
+            if (node.isLongClickable) {
+                val result = node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
+                if (result) {
+                    Log.d(TAG, "Node long clicked directly")
+                    return true
+                }
+            }
+            
+            // 2순위: 부모 노드에서 길게 누르기 가능한 노드 찾기
+            var parent = node.parent
+            var depth = 0
+            while (parent != null && depth < 5) {
+                if (parent.isLongClickable) {
+                    val result = parent.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
+                    if (result) {
+                        Log.d(TAG, "Parent node long clicked (depth: $depth)")
+                        return true
+                    }
+                }
+                parent = parent.parent
+                depth++
+            }
+            
+            // 3순위: 노드가 길게 누르기 가능하지 않아도 ACTION_LONG_CLICK 시도
+            val result = node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
+            if (result) {
+                Log.d(TAG, "Node long clicked despite not being marked as long-clickable")
+                return true
+            }
+            
+            Log.w(TAG, "Failed to long click node: not long-clickable and no long-clickable parent found")
+            false
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to long click node", e)
+            false
+        }
+    }
+    
+    /**
      * 텍스트 입력
      * 
      * ACTION_SET_TEXT를 시도하고, 실패하면 클립보드 붙여넣기 fallback 사용

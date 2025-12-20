@@ -405,10 +405,14 @@ const PROMOTION_DETECTOR = {
         message += `📌 무단 홍보 감지 ${count}회째입니다.\n`;
         
         if (count >= 3) {
-            message += `🚨 관리자 분들은 확인해주세요.`;
+            message += `🚨 관리자에게 보고되었으며, 강퇴 처리됩니다.\n`;
+            message += `문의: https://open.kakao.com/o/sOlCUKjh`;
         } else {
-            message += `관리자 분들은 가려주세요.`;
+            message += `관리자 분들은 가려주세요.\n`;
+            message += `홍보를 원하시면 관리자에게 문의해주세요: https://open.kakao.com/o/sOlCUKjh`;
         }
+        
+        message += `\n\n🗑️ 해당 문제 메시지는 자동 삭제 처리됩니다.`;
         
         return message;
     }
@@ -779,6 +783,9 @@ const NOTICE_SYSTEM = {
 const PENDING_ATTACHMENT_CACHE = new Map();
 const ATTACHMENT_CACHE_TTL = 10 * 60 * 1000;  // 10분
 
+// roomName 정규화 유틸리티 import
+const { createCacheKey, normalizeRoomNameForCache } = require('./db/utils/roomKeyNormalizer');
+
 /**
  * pending attachment 캐시에 이미지 저장
  * @param {string} roomName - 채팅방 이름
@@ -787,16 +794,29 @@ const ATTACHMENT_CACHE_TTL = 10 * 60 * 1000;  // 10분
  */
 function setPendingAttachment(roomName, senderId, imageUrl) {
     if (!roomName || !senderId || !imageUrl) {
+        if (process.env.DEBUG_CACHE === '1') {
+            console.log(`[이미지 캐시] 저장 스킵: roomName=${!!roomName}, senderId=${!!senderId}, imageUrl=${!!imageUrl}`);
+        }
         return;
     }
     
-    const key = `${roomName}|${senderId}`;
+    // 정규화된 캐시 키 생성
+    const key = createCacheKey(roomName, senderId);
+    const normalizedRoom = normalizeRoomNameForCache(roomName);
+    
     PENDING_ATTACHMENT_CACHE.set(key, {
         imageUrl: imageUrl,
         timestamp: Date.now()
     });
     
-    console.log(`[이미지 캐시] 저장: key=${key}, url=${imageUrl.substring(0, 50)}...`);
+    console.log(`[이미지 캐시] 저장: key="${key}", roomName="${normalizedRoom}", senderId="${senderId}", url=${imageUrl.substring(0, 50)}...`);
+    
+    if (process.env.DEBUG_CACHE === '1') {
+        // 디버그 모드: 현재 캐시에 있는 키 샘플 출력
+        const keys = Array.from(PENDING_ATTACHMENT_CACHE.keys());
+        const sampleKeys = keys.filter(k => k.startsWith(normalizedRoom + '|')).slice(0, 5);
+        console.log(`[이미지 캐시] 디버그: 같은 roomName prefix 키 샘플:`, sampleKeys);
+    }
 }
 
 /**
@@ -807,13 +827,25 @@ function setPendingAttachment(roomName, senderId, imageUrl) {
  */
 function getAndClearPendingAttachment(roomName, senderId) {
     if (!roomName || !senderId) {
+        if (process.env.DEBUG_CACHE === '1') {
+            console.log(`[이미지 캐시] 조회 스킵: roomName=${!!roomName}, senderId=${!!senderId}`);
+        }
         return null;
     }
     
-    const key = `${roomName}|${senderId}`;
+    // 정규화된 캐시 키 생성 (저장 시와 동일한 함수 사용)
+    const key = createCacheKey(roomName, senderId);
+    const normalizedRoom = normalizeRoomNameForCache(roomName);
     const cached = PENDING_ATTACHMENT_CACHE.get(key);
     
     if (!cached) {
+        if (process.env.DEBUG_CACHE === '1') {
+            // 캐시 미스 시 상세 정보 로그
+            const keys = Array.from(PENDING_ATTACHMENT_CACHE.keys());
+            const sampleKeys = keys.filter(k => k.startsWith(normalizedRoom + '|') || k.includes(String(senderId))).slice(0, 5);
+            console.log(`[이미지 캐시] 미스: key="${key}", roomName="${normalizedRoom}", senderId="${senderId}"`);
+            console.log(`[이미지 캐시] 디버그: 유사 키 샘플:`, sampleKeys);
+        }
         return null;
     }
     
@@ -821,13 +853,13 @@ function getAndClearPendingAttachment(roomName, senderId) {
     const age = Date.now() - cached.timestamp;
     if (age > ATTACHMENT_CACHE_TTL) {
         PENDING_ATTACHMENT_CACHE.delete(key);
-        console.log(`[이미지 캐시] 만료됨: key=${key}, age=${age}ms`);
+        console.log(`[이미지 캐시] 만료됨: key="${key}", age=${Math.floor(age / 1000)}s`);
         return null;
     }
     
     // 조회 후 삭제
     PENDING_ATTACHMENT_CACHE.delete(key);
-    console.log(`[이미지 캐시] 조회 및 삭제: key=${key}, url=${cached.imageUrl.substring(0, 50)}...`);
+    console.log(`[이미지 캐시] 조회 및 삭제: key="${key}", url=${cached.imageUrl.substring(0, 50)}...`);
     
     return cached.imageUrl;
 }
@@ -1286,6 +1318,13 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
             if (count >= 3) {
                 console.log(`[무단 홍보] 🚨 3회 이상! 관리자 보고됨: ${senderName}`);
             }
+            
+            // 무단홍보 메시지 자동 삭제 명령 전송 (Bridge APK에)
+            // 이 부분은 server.js에서 처리하도록 전달
+            // promotionResult에 삭제 명령 정보 포함
+            promotionResult.shouldDelete = true;
+            promotionResult.roomKey = room;
+            promotionResult.messageText = processedMsg;
         }
     }
     
@@ -1333,10 +1372,21 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
             });
         
         try {
+            // sender에서 reporterName과 reporterId 추출
+            const reporterName = extractSenderName(null, sender);
+            const reporterId = sender.includes('/') ? sender.split('/')[1] : null;
+            
+            console.log('[신고] saveReport 호출:', {
+                reportedMessageId: targetMessageId,
+                reporterName: reporterName,
+                reporterId: reporterId,
+                reportReason: reportReason
+            });
+            
             const reportResult = await chatLogger.saveReport(
                 targetMessageId,
-                sender,
-                sender.includes('/') ? sender.split('/')[1] : null,
+                reporterName || sender, // extractSenderName 실패 시 원본 sender 사용
+                reporterId,
                 reportReason,
                 'general'
             );
@@ -1529,7 +1579,14 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
             }
             
             // Phase 4: 캐시에서 이미지 조회 (우선)
-            let previousMessageImage = getAndClearPendingAttachment(room, questionSenderId);
+            // questionSenderId가 null이거나 undefined일 수 있으므로 체크
+            let previousMessageImage = null;
+            if (questionSenderId) {
+                previousMessageImage = getAndClearPendingAttachment(room, questionSenderId);
+                console.log(`[네이버 카페] 캐시에서 이미지 조회: room="${room}", senderId="${questionSenderId}", found=${!!previousMessageImage}`);
+            } else {
+                console.warn(`[네이버 카페] ⚠️ questionSenderId가 없어 캐시 조회 불가: room="${room}", questionSenderId="${questionSenderId}"`);
+            }
             
             // 캐시에서 못 찾으면 DB 조회 (fallback)
             if (!previousMessageImage) {
@@ -1656,21 +1713,39 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
             console.log(`[네이버 카페] API 호출 대기 중... (접근성 fallback으로 즉시 전송 예정)`);
             
             // 이미지 다운로드 및 변환 (URL인 경우)
-            let imageBuffers = null;
+            let imageBuffers = [];
             if (previousMessageImage) {
                 try {
                     const axios = require('axios');
+                    console.log(`[네이버 카페] ═══════════════════════════════════════════════════════`);
                     console.log(`[네이버 카페] 이미지 다운로드 시작: ${previousMessageImage}`);
+                    console.log(`[네이버 카페] 이미지 URL 타입: ${typeof previousMessageImage}`);
+                    
                     const imageResponse = await axios.get(previousMessageImage, {
                         responseType: 'arraybuffer',
-                        timeout: 10000 // 10초 타임아웃
+                        timeout: 30000, // 30초 타임아웃
+                        maxRedirects: 5,
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        }
                     });
-                    imageBuffers = [Buffer.from(imageResponse.data)];
-                    console.log(`[네이버 카페] 이미지 다운로드 완료: ${imageBuffers[0].length} bytes`);
+                    
+                    if (imageResponse.data && imageResponse.data.length > 0) {
+                        imageBuffers = [Buffer.from(imageResponse.data)];
+                        console.log(`[네이버 카페] ✅ 이미지 다운로드 완료: ${imageBuffers[0].length} bytes`);
+                        console.log(`[네이버 카페] 이미지 Buffer 개수: ${imageBuffers.length}`);
+                    } else {
+                        console.warn(`[네이버 카페] ⚠️ 이미지 데이터가 비어있음`);
+                    }
+                    console.log(`[네이버 카페] ═══════════════════════════════════════════════════════`);
                 } catch (error) {
-                    console.error(`[네이버 카페] 이미지 다운로드 실패: ${error.message}`);
+                    console.error(`[네이버 카페] ❌ 이미지 다운로드 실패: ${error.message}`);
+                    console.error(`[네이버 카페] 오류 상세:`, error.response?.status, error.response?.statusText);
                     // 이미지 다운로드 실패해도 질문 작성은 계속 진행
+                    imageBuffers = [];
                 }
+            } else {
+                console.log(`[네이버 카페] 이미지 없음: previousMessageImage=${previousMessageImage}`);
             }
             
             try {
@@ -1684,8 +1759,10 @@ async function handleMessage(room, msg, sender, isGroupChat, replyToMessageId = 
                     clubid: clubid,
                     menuid: menuid,
                     headid: finalHeadid, // 유효한 경우에만 전달
-                    images: imageBuffers // 이미지 Buffer 배열 전달
+                    images: imageBuffers.length > 0 ? imageBuffers : null // 이미지 Buffer 배열 전달 (없으면 null)
                 });
+                
+                console.log(`[네이버 카페] submitQuestion 호출: 이미지 개수=${imageBuffers.length}`);
                 
                 console.log(`[네이버 카페] API 호출 완료: success=${result.success}, error=${result.error || '없음'}`);
                 
