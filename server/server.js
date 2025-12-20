@@ -1239,7 +1239,18 @@ wss.on('connection', function connection(ws, req) {
       
       // 반응(reaction) 메시지 처리
       if (messageData.type === 'reaction' || messageData.type === 'like') {
-        const { room, sender, json } = messageData;
+        // room, sender 변수가 이미 선언되었을 수 있으므로 재선언하지 않고 재할당만 수행
+        if (typeof room === 'undefined') {
+          var room = messageData.room;
+        } else {
+          room = messageData.room;
+        }
+        if (typeof sender === 'undefined') {
+          var sender = messageData.sender;
+        } else {
+          sender = messageData.sender;
+        }
+        const json = messageData.json;
         const chatLogger = require('./db/chatLogger');
         
         try {
@@ -1369,7 +1380,24 @@ wss.on('connection', function connection(ws, req) {
 
       // 2️⃣ IrisLink message 타입 처리
       if (messageData.type === 'message') {
-        let { room, sender, message, isGroupChat, json } = messageData;
+        // room, sender, isGroupChat 변수가 이미 선언되었을 수 있으므로 재선언하지 않고 재할당만 수행
+        if (typeof room === 'undefined') {
+          var room = messageData.room;
+        } else {
+          room = messageData.room;
+        }
+        if (typeof sender === 'undefined') {
+          var sender = messageData.sender;
+        } else {
+          sender = messageData.sender;
+        }
+        if (typeof isGroupChat === 'undefined') {
+          var isGroupChat = messageData.isGroupChat;
+        } else {
+          isGroupChat = messageData.isGroupChat;
+        }
+        const message = messageData.message;
+        const json = messageData.json;
         
         // 발신자 이름 처리:
         // 1. 클라이언트에서 이미 "이름/user_id" 형식으로 보낸 경우 그대로 사용
@@ -2325,32 +2353,32 @@ wss.on('connection', function connection(ws, req) {
             const messageStr = JSON.stringify(sendMessage);
             console.log(`[Bridge 전송] 전송할 메시지: ${messageStr.substring(0, 200)}...`);
             
-          // 첫 번째 Bridge APK에게 즉시 전송
-          console.log(`[Bridge 전송] ═══════════════════════════════════════════════════════`);
-          console.log(`[Bridge 전송] 전송 시도: replies[${i}], bridgeClients.length=${bridgeClients.length}`);
-          console.log(`[Bridge 전송] 메시지 내용: ${messageStr.substring(0, 200)}...`);
-          
-          if (bridgeClients.length > 0) {
-            try {
-              bridgeClients[0].send(messageStr);
-              sentCount++;
-              console.log(`[Bridge 전송] ✓✓✓ 메시지 전송 성공 ✓✓✓`);
-              console.log(`[Bridge 전송]   id=${sendMessage.id}`);
-              console.log(`[Bridge 전송]   roomKey="${sendMessage.roomKey}"`);
-              console.log(`[Bridge 전송]   text="${sendMessage.text?.substring(0, 50)}..."`);
-              console.log(`[Bridge 전송]   imageUrl=${imageUrl ? `"${imageUrl}"` : '없음'}`);
-            } catch (err) {
-              console.error(`[Bridge 전송] ✗✗✗ 클라이언트 전송 실패 ✗✗✗`);
-              console.error(`[Bridge 전송]   오류: ${err.message}`);
-              console.error(`[Bridge 전송]   스택: ${err.stack}`);
+            // 첫 번째 Bridge APK에게 즉시 전송
+            console.log(`[Bridge 전송] ═══════════════════════════════════════════════════════`);
+            console.log(`[Bridge 전송] 전송 시도: replies[${i}], bridgeClients.length=${bridgeClients.length}`);
+            console.log(`[Bridge 전송] 메시지 내용: ${messageStr.substring(0, 200)}...`);
+            
+            if (bridgeClients.length > 0) {
+              try {
+                bridgeClients[0].send(messageStr);
+                sentCount++;
+                console.log(`[Bridge 전송] ✓✓✓ 메시지 전송 성공 ✓✓✓`);
+                console.log(`[Bridge 전송]   id=${sendMessage.id}`);
+                console.log(`[Bridge 전송]   roomKey="${sendMessage.roomKey}"`);
+                console.log(`[Bridge 전송]   text="${sendMessage.text?.substring(0, 50)}..."`);
+                console.log(`[Bridge 전송]   imageUrl=${imageUrl ? `"${imageUrl}"` : '없음'}`);
+              } catch (err) {
+                console.error(`[Bridge 전송] ✗✗✗ 클라이언트 전송 실패 ✗✗✗`);
+                console.error(`[Bridge 전송]   오류: ${err.message}`);
+                console.error(`[Bridge 전송]   스택: ${err.stack}`);
+              }
+            } else {
+              console.error(`[Bridge 전송] ✗✗✗ Bridge APK 클라이언트가 연결되어 있지 않음 ✗✗✗`);
+              console.error(`[Bridge 전송]   전체 WebSocket 클라이언트 수: ${wss?.clients?.size || 0}`);
+              console.error(`[Bridge 전송]   현재 클라이언트 제외 후: ${bridgeClients.length}개`);
+              console.error(`[Bridge 전송]   현재 클라이언트(ws)는 Iris 클라이언트이므로 제외됨`);
             }
-          } else {
-            console.error(`[Bridge 전송] ✗✗✗ Bridge APK 클라이언트가 연결되어 있지 않음 ✗✗✗`);
-            console.error(`[Bridge 전송]   전체 WebSocket 클라이언트 수: ${wss?.clients?.size || 0}`);
-            console.error(`[Bridge 전송]   현재 클라이언트 제외 후: ${bridgeClients.length}개`);
-            console.error(`[Bridge 전송]   현재 클라이언트(ws)는 Iris 클라이언트이므로 제외됨`);
-          }
-          console.log(`[Bridge 전송] ═══════════════════════════════════════════════════════`);
+            console.log(`[Bridge 전송] ═══════════════════════════════════════════════════════`);
           }
           
           console.log(`[Bridge 전송] 응답 ${replies.length}개 즉시 전송 완료: roomKey="${actualRoomKey}", Bridge APK 전송=${sentCount}개`);
@@ -2365,7 +2393,26 @@ wss.on('connection', function connection(ws, req) {
       }
 
       // 3️⃣ 기존 형식 호환 (room, sender, msg)
-      const { room, sender, msg, isGroupChat } = messageData;
+      // room, sender, isGroupChat 변수가 이미 선언되었을 수 있으므로 재선언하지 않고 재할당만 수행
+      const msg = messageData.msg;
+      
+      // room, sender, isGroupChat는 이미 선언되었을 수 있으므로 재할당만 수행
+      // 함수 스코프에서 var로 선언하여 중복 선언 방지
+      if (typeof room === 'undefined') {
+        var room = messageData.room;
+      } else {
+        room = messageData.room;
+      }
+      if (typeof sender === 'undefined') {
+        var sender = messageData.sender;
+      } else {
+        sender = messageData.sender;
+      }
+      if (typeof isGroupChat === 'undefined') {
+        var isGroupChat = messageData.isGroupChat !== undefined ? messageData.isGroupChat : true;
+      } else {
+        isGroupChat = messageData.isGroupChat !== undefined ? messageData.isGroupChat : true;
+      }
 
       if (!room || !sender || !msg) {
         ws.send(JSON.stringify({
@@ -2452,6 +2499,7 @@ wss.on('connection', function connection(ws, req) {
           }
           
           console.log(`[Bridge 전송] 응답 ${replies.length}개 즉시 전송 완료: roomKey="${actualRoomKey}", Bridge APK 전송=${sentCount}개`);
+        }
       }
     } catch (error) {
       console.error(`[${new Date().toISOString()}] 메시지 처리 오류:`, error);
