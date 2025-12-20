@@ -1272,18 +1272,41 @@ wss.on('connection', function connection(ws, req) {
           });
           
           if (targetMessageId && reactorName) {
+            // targetMessageId는 kakao_log_id일 수 있으므로, 먼저 DB에서 실제 message id를 찾아야 함
+            let actualMessageId = null;
+            try {
+              const numericLogId = parseInt(targetMessageId);
+              if (!isNaN(numericLogId)) {
+                const db = require('./db/database');
+                const { data: messageByLogId } = await db.supabase
+                  .from('chat_messages')
+                  .select('id')
+                  .eq('kakao_log_id', numericLogId)
+                  .single();
+                if (messageByLogId) {
+                  actualMessageId = String(messageByLogId.id);
+                  console.log(`[반응 저장] kakao_log_id(${numericLogId})로 메시지 찾음: DB id=${actualMessageId}`);
+                }
+              }
+            } catch (err) {
+              console.warn('[반응 저장] kakao_log_id로 메시지 찾기 실패:', err.message);
+            }
+            
+            // kakao_log_id로 찾지 못했으면 targetMessageId를 그대로 사용 (DB id일 수도 있음)
+            const messageIdToSave = actualMessageId || String(targetMessageId);
+            
             await chatLogger.saveReaction(
-              String(targetMessageId), // 문자열로 변환
+              messageIdToSave,
               reactionType,
               reactorName,
               reactorId ? String(reactorId) : null,
               isAdminReaction
             );
             
-            // 반응 상세 로그도 저장
+            // 반응 상세 로그도 저장 (kakao_log_id 사용)
             moderationLogger.saveReactionLog({
               roomName: room,
-              targetMessageId: String(targetMessageId),
+              targetMessageId: String(targetMessageId), // kakao_log_id 저장
               targetMessageText: null,  // 대상 메시지 내용은 별도 조회 필요
               reactorName: reactorName,
               reactorId: reactorId,
@@ -2097,7 +2120,9 @@ wss.on('connection', function connection(ws, req) {
         // 닉네임 변경 알림 추가 (있는 경우)
         if (nicknameChangeNotification) {
           replies.unshift(nicknameChangeNotification);
-          console.log('[닉네임 변경] 알림을 replies에 추가');
+          console.log('[닉네임 변경] ✅ 알림을 replies에 추가:', nicknameChangeNotification.substring(0, 100));
+        } else {
+          console.log('[닉네임 변경] 알림 없음 (변경 없음 또는 새 사용자)');
         }
         
         console.log(`[${new Date().toISOString()}] ═══════════════════════════════════════════════════════`);
