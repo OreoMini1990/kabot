@@ -1,0 +1,183 @@
+{
+  "chat_logs": {
+    "columns": [
+      "_id",
+      "id",
+      "type",
+      "chat_id",
+      "thread_id",
+      "scope",
+      "user_id",
+      "message",
+      "attachment",
+      "created_at",
+      "deleted_at",
+      "client_message_id",
+      "prev_id",
+      "referer",
+      "supplement",
+      "v"
+    ],
+    "reply_columns": [
+      "referer"
+    ],
+    "total_messages": 1931,
+    "reply_messages": [
+      {
+        "table": "chat_logs",
+        "msg_id": 8986,
+        "chat_id": 4959219027917264,
+        "user_id": 223031464,
+        "referer": 3,
+        "v": "{\"notDecoded\":false,\"origin\":\"CHATINFO\",\"c\":\"12-16 18:40:20\",\"modifyRevision\":0,\"isSingleDefaultEmoticon\":false,\"defaultEmoticonsCount\":0,\"isMine\":false,\"enc\":31}",
+        "v_text": "{'notDecoded': False, 'origin': 'CHATINFO', 'c': '",
+        "created_at": 1765878021
+      },
+      {
+        "table": "chat_logs",
+        "msg_id": 135,
+        "chat_id": 4958831388448286,
+        "user_id": 212993479,
+        "referer": 3,
+        "v": "{\"enc\":31,\"modifyRevision\":0,\"isMine\":false}",
+        "v_text": "{'enc': 31, 'modifyRevision': 0, 'isMine': False}",
+        "created_at": 1765510844
+      },
+      {
+        "table": "chat_logs",
+        "msg_id": 134,
+        "chat_id": 4958831388448286,
+        "user_id": 212993479,
+        "referer": 3,
+        "v": "{\"enc\":31,\"modifyRevision\":0,\"isMine\":false}",
+        "v_text": "{'enc': 31, 'modifyRevision': 0, 'isMine': False}",
+        "created_at": 1765510833
+      },
+      {
+        "table": "chat_logs",
+        "msg_id": 133,
+        "chat_id": 4958831388448286,
+        "user_id": 212993479,
+        "referer": 3,
+        "v": "{\"enc\":31,\"modifyRevision\":0,\"isMine\":false}",
+        "v_text": "{'enc': 31, 'modifyRevision': 0, 'isMine': False}",
+        "created_at": 1765499477
+      },
+      {
+        "table": "chat_logs",
+        "msg_id": 132,
+        "chat_id": 4958831388448286,
+        "user_id": 212993479,
+        "referer": 3,
+        "v": "{\"enc\":31,\"modifyRevision\":0,\"isMine\":false}",
+        "v_text": "{'enc': 31, 'modifyRevision': 0, 'isMine': False}",
+        "created_at": 1765499467
+      },
+      {
+        "table": "chat_logs",
+        "msg_id": 100,
+        "chat_id": 4958753949237558,
+        "user_id": 223872471,
+        "referer": 3,
+        "v": "{\"enc\":31,\"modifyRevision\":0,\"isMine\":false}",
+        "v_text": "{'enc': 31, 'modifyRevision': 0, 'isMine': False}",
+        "created_at": 1765423842
+      },
+      {
+        "table": "chat_logs",
+        "msg_id": 97,
+        "chat_id": 4954181446628755,
+        "user_id": 224089685,
+        "referer": 3,
+        "v": "{\"enc\":31,\"modifyRevision\":0,\"isMine\":false}",
+        "v_text": "{'enc': 31, 'modifyRevision': 0, 'isMine': False}",
+        "created_at": 1764820053
+      },
+      {
+        "table": "chat_logs",
+        "msg_id": 96,
+        "chat_id": 4958057518780238,
+        "user_id": 413137852,
+        "referer": 3,
+        "v": "{\"enc\":31,\"modifyRevision\":0,\"isMine\":false}",
+        "v_text": "{'enc': 31, 'modifyRevision': 0, 'isMine': False}",
+        "created_at": 1764743735
+      },
+      {
+        "table": "chat_logs",
+        "msg_id": 89,
+        "chat_id": 4955666602067590,
+        "user_id": 303834446,
+        "referer": 3,
+        "v": "{\"enc\":31,\"modifyRevision\":0,\"isMine\":false}",
+        "v_text": "{'enc': 31, 'modifyRevision': 0, 'isMine': False}",
+        "created_at": 1762408855
+      },
+      {
+        "table": "chat_logs",
+        "msg_id": 87,
+        "chat_id": 4949281888670788,
+        "user_id": 283380305,
+        "referer": 3,
+        "v": "{\"enc\":31,\"modifyRevision\":0,\"isMine\":false}",
+        "v_text": "{'enc': 31, 'modifyRevision': 0, 'isMine': False}",
+        "created_at": 1762228826
+      }
+    ]
+  },
+  "chat_rooms": {
+    "columns": [
+      "_id",
+      "id",
+      "type",
+      "members",
+      "active_member_ids",
+      "last_log_id",
+      "last_message",
+      "last_updated_at",
+      "unread_count",
+      "watermarks",
+      "temporary_message",
+      "v",
+      "ext",
+      "last_read_log_id",
+      "last_update_seen_id",
+      "active_members_count",
+      "meta",
+      "is_hint",
+      "private_meta",
+      "last_chat_log_type",
+      "schat_token",
+      "last_skey_token",
+      "last_pk_tokens",
+      "link_id",
+      "moim_meta",
+      "invite_info",
+      "blinded_member_ids",
+      "mute_until_at",
+      "last_joined_log_id"
+    ],
+    "reply_columns": [],
+    "total_messages": 33,
+    "reply_messages": []
+  },
+  "chat_threads": {
+    "columns": [
+      "chat_id",
+      "thread_id",
+      "last_chat_log_id",
+      "last_read_log_id",
+      "last_display_log_id",
+      "mentioned_chat_log_id",
+      "new_chat_log_id",
+      "has_mention",
+      "has_new",
+      "is_participating",
+      "count",
+      "v"
+    ],
+    "reply_columns": [],
+    "total_messages": 0,
+    "reply_messages": []
+  }
+}

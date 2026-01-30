@@ -24,7 +24,10 @@ module.exports = {
         GITHUB_REPO: 'labbot',             // ⚠️ 실제 레포지토리 이름으로 변경하세요
         GITHUB_FILE_PATH: 'irispy.py',        // 동기화할 파일 경로 (레포지토리 내 경로)
         // GITHUB_TOKEN: 'ghp_xxxxxxxxxxxx',     // 선택사항: Private 레포지토리인 경우만 주석 해제하고 토큰 입력
-        SERVER_URL: 'http://211.218.42.222:5002'  // 서버 URL (파일 다운로드용)
+        SERVER_URL: 'http://192.168.0.15:5002',  // 서버 URL (파일 다운로드용)
+        // OAuth 연동 링크 (미설정 시 SERVER_URL 사용). Vercel 등 외부 인증 시 설정
+        NAVER_OAUTH_BASE_URL: 'https://medifirstall.vercel.app',
+        NAVER_OAUTH_START_PATH: '/oauth/naver/start'  // naver-oauth-app 사용 시 BASE_URL=해당앱 URL, START_PATH=/api/start
       },
       error_file: './logs/kakkaobot-error.log',
       out_file: './logs/kakkaobot-out.log',

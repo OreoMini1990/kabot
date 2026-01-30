@@ -1,0 +1,4321 @@
+{
+  "main_db": {
+    "database": "main",
+    "tables": [
+      {
+        "name": "android_metadata",
+        "structure": {
+          "name": "android_metadata",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "locale",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 1,
+        "samples": [
+          {
+            "locale": "ko_KR"
+          }
+        ]
+      },
+      {
+        "name": "chat_logs",
+        "structure": {
+          "name": "chat_logs",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "type",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "chat_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "thread_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "scope",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "user_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "message",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "attachment",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 10,
+              "name": "deleted_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 11,
+              "name": "client_message_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 12,
+              "name": "prev_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 13,
+              "name": "referer",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 14,
+              "name": "supplement",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 15,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 1752,
+        "samples": [
+          {
+            "_id": 1,
+            "id": 3607650857048612864,
+            "type": 18,
+            "chat_id": 440387067254143,
+            "thread_id": null,
+            "scope": 1,
+            "user_id": 429744344,
+            "message": "E4FAfCpdH79fJatpnaNdwmUAUCRZCQmtIJj95KxDhgc=",
+            "attachment": "ZEGX0Z7zarttIPSyeHkGLd82zUZVYJcNMmLhIsLlM4GrpKzZFH0UUB7m8Ebp3ykXBcVUVoGFS01yzae6WhSRe/tu7RKiDKlFvU0vcN4RXODZDAfwo6lMaeie57kCLIiyZeKR/79Xhq5oqEz9juS07AWYSud9CcDpHJBWURLAeVLp/LD6rAw+/9Rh+3BMRNxyWTobOoxmzPeiuf/B5/lYC2zjN/AQkdujLA/m4twBxGhb4VxPFVDS1ORxATaLiDxdw1HImevHzKBWseL/fndiGy71Kjjn9l/+l1sdGbBr0YWZkEJG/U+Rb1MdGnxWO4slX1h0Xt1uhKn3ebega8mv+6RL+x+zPsm+1Tn9ZxUExukDjrLwM7GCR20hADXKwi8G3876jlQEtczG7QAxkYu1IfFfm24TxosQBfLN5kD9SO+Lwl2BBa+N8a3NqGBg9yD69WExRIcxWZ97OJ4KsCruX3sdLn3pg9ZglT2ddiyoos6jQCWCbG0mez2QnyBpXsgtIOYRn4AePf/QnbSPAjPaOA==",
+            "created_at": 1751002695,
+            "deleted_at": 0,
+            "client_message_id": null,
+            "prev_id": 0,
+            "referer": 0,
+            "supplement": null,
+            "v": {
+              "enc": 31,
+              "modifyRevision": 0,
+              "isMine": true
+            }
+          },
+          {
+            "_id": 2,
+            "id": 3607734238661277696,
+            "type": 72,
+            "chat_id": 4943996873286908,
+            "thread_id": null,
+            "scope": 1,
+            "user_id": 338657515,
+            "message": "1g8S64Km2hzRZLWoMFsoF4jRurk/cq+4/14zCjkVfxxwYdGifbzU8xS0/bfRuus/u9cRPsGbjqi/ILV/IspbSfBKMo0mtPsyU8GDKeskuEDel1VFILzcnQqfSh7i4G+69KgbJ2zmPh4JLqEotqLisWoAG4heS47Mp9OYJct/LUvVug2XTHJMPFv5NJ7i26Hht6WdYi46cC0L5Z04vGzseFdvevxiYnnZs791xO/UbdsiShPjxQIy5j2RhtCXpqEJvNJrWKPssZVdwF99dwSKSKaEHx+9rC8JhJe0umhg/p/OsrnqbrT4sIAaLjCUTsKbSDDxaZxa1BhtneZt09gPwJehavprKZdO7FdG1AmMa5IVriySVgJa7T1VKSAzLCyoynmCAWS5l1Zkg5KkppgA6IWRoP4/yKrP0a1wESFaT52qRldpRpClDOy2rAYgpnSIeC4tHdEc2nibXSXLlrjcNK1db919yZeg2ePApq5G7+mOFZUMRcO1VDzCTQf7oJPIkgqACyVT6MFAqcKZFFRWFUM2C5jhOBmrByILB7NIC9Br+b1aOv5F5xfULygUKgEe",
+            "attachment": "EUD5x1KXGyZAtoQerxtP7tGX4ZCK8tf3EXeHSlkdvCpERzPtOCofMy7sevBbuuIFUNzg24IRZL8dyR/xJXpENzsGMP2b6y8WKeNFr/5BoYRfh9ZTYtDX22piyvuQkgcBdCpmYGdgn76tVsW0EBSEFboJeqZ6TabX0akUEeo0I2cJKXsxIXdRtvVd8qwIdWYCiJZVy81RIq4MbvNLbsgcAWCyUwkipSuxhJD9vD8WUCY5/M1sfhg2wUxVLukmJIGjHFD54k6drDGZDnC+mCtpIpe4np0nEsuWWnaIJUuU71RCaD+Ed2z/UdC6gTJBX4ug0g1myi1RvBcA2d6QLxPfP66Ix5p700t4lDvAVCicg3aQJ6bczEfgXHa7gBAtfZxrJDDnoyQ157LwZj0dgbHVTNFQ7foPYFVCycXpSaxE4oPXS0yXe1SlD7GGsqAdVvjDU4kLGqECcupFnFL+fqHKlbDrCE4sRVXtKNQpc/6iuHhnfwDd97SvSmKumFs821XdthExZUPVlO3lpmLbujcsDBITkhAhHZe37IETWruaylTxuyAjnh0q5P2MGOa2Zcy5sIgUoiXpoEf7RRR/qwonpovL5sIsFmzSbmAhdI+6jp+0Ow8/S956/GOeWFaJGpT25r7rUZQdYMetEaGwOv8ulZ7sOG2kA2ptQuegRieOiDjV6RNHasb3TpeJ0IIkqM+iR6Ftu0Qi5BkIqjJQKqPN4H6gvp3yhI7Or2fl/BXRgy/+89FEtyBLIax8OtInnFBUWmV/LHM+exGUZXgR7pz7K3h7WhFvdXX631yqdGMOz1gO8CvUNgBj3JL/3eI7el7IuJ2Oc2CMYVMY1ybaEen5rW5osSeRsJcWMHZi+d3x5/8gT+y58hRzYs1ISNgrsldrijBgd2DueH6AW9ytWALvaaFIvYEp2kGBwutU5ZP/N8kk+6YlFDQwukULJPLMxTiNerIvAYAAfSag43DFoAmOda8BSEtyDMY11knIhrVjtZdhxRxqwbQCrsK/9YfkHryMniDv19ngpUVuAd857+5CPzEKVxpabov5APfOWevzntzToLkVMR3GLpIm38QvKa/nW27XeYs2i3JQPUiu4VRqalLJE87KnaptJScKZR7VgLSk6B5VnlkW+jBm/YYhpH4YIDW0TuQvIhy6EmbbxjdKKueC08s0EownXFcukTxWoLZatX4+dlKOc3PziGjeTrrm+XHUcczNAyK8QAwz/PTr7g+KeB5oYLj20dV5kl9Aq+87KKVftiom1QgPmdgw8IbhPu15gMqkPQ0gILr2aVePiETXSH50Z2u56c8w177fqpjHkJP1OfDz7sP7gw+mr20GxVivkURJqNKvIMWDey4m+1dpIDmCm0lQcP3rhtWlW/+bLMuinYocGxt/L+3vcgK8w4ZEajt9C/ryry3xeAKK3ijAKIKvtu5981tLgGApcLmyCvcT2SpQ5yDMs5YokkI0j7KiuT27RKuWS2dkdrw2bTkr8+6OM1WLoWt9QbqpN+94Kz75g+/48FenCXMu5UMT7aP49FL2cDWVtllx2knfxBjDFG3zc728O7QJQ0eMuYiONSHxyPCxI9Oe5+xvKyV6ulSlQRJZ7+6L7+pxPjpeqUooGSzSjTN/kDGhrEHkXo/DlARvKcAc5zGaGI58tkph5w74x9stfFhAA72kOGFJAcb2wuByJncvNcw9xKTAYzMoqbJcuJr8GhTHGCtbH5Xmji3iiZ/5VqkZXzB+0gKMB23ORmQ3tRoseU3In9zrtAbKGh+HbB+weD/4xE2L9/LhFOGQN+br5eH2glSSmC+88F16csloujYKb55sCiTFqEYweSXhOKBkFX9JCTCqcVRKqBX6rx3dDZkSoa39okLWl2OZfGDDVTTGn4hOPXl7DM5aoQJdOawgzMqqtwHy7LjB42tNBm4yFKKrkdWjr6GJBoyHP50GIefhUfO2WuMHhDqhPwjliyl/iOwC7KSyvQvP6upNA5LySc8grjHY8uq4o3P33YJbOBSXMhAPrP9YGoVGWSAiYRRTGIL6aEbFYwDsUxUml5hL4nV6nFKRexceYlES8k4hWgUsRYbpFdQbtPwXTCYGBBzW9LDD6mwjGgnAeB6FQdRVtwGRG4zsZBhly1eai7pND4yYKWovnMyGNQyC9D2VezGpbd141P1EltXlM8SBOaNq9TOb+nzhcC9qWBhO2lssaBJywIX8/YzNP77Tpcwlc+TSEyPTMDVi0GEipddc9TsVoZp/fX4L25ssR0oPih2csS8iUU7uw3s4matqxwwPPB46N80+dawR0abrawaysbZcLvS0gaCSFSy8/9sSs/srtLTEZ7dTdgMiIgyoOhdrxH1wddhLilQkFLd3em3tzoRoFenPalEgM7gOyFp8/WbtUeCBM95bL9tvdtPneKreeEkH/RLae1BLHWH5ECRRldznM35XyPaWyo0Ott8hGVxx5BaJ5HzqUYgF67wIPB6BfkAeM3jj4Bg0/+aHe/sd4Ng6pSrpPOEtKFIZTkY7ii8iIbVg6/iCFoJZbmw=",
+            "created_at": 1751012635,
+            "deleted_at": 0,
+            "client_message_id": null,
+            "prev_id": 0,
+            "referer": 3,
+            "supplement": "",
+            "v": {
+              "enc": 31,
+              "modifyRevision": 0,
+              "isMine": false
+            }
+          },
+          {
+            "_id": 3,
+            "id": 3608178666702028800,
+            "type": 72,
+            "chat_id": 4944051124754447,
+            "thread_id": null,
+            "scope": 1,
+            "user_id": 39186309,
+            "message": "oJBML68IYNUzkACjohZVajjUZJe5672yB/CKcznIS8iwDSpyvT1yb0E0veHyBtdld8tI00PLA8qM4V3oN2SjeBtLB2kvfwTb1XEeYvXpdxF+sJvme38uFpkAPDUhXrZT0xF5MYK7V/Fmu/szLLE6TBnN/NAvYPznS8PdUgo1WUZg9FQDoXWqwJBUWDH/WQlKkhCFmoKt0lC30wyNPHIjS1vrRcgvW1pJhKIBepYfZhqcLyCnowKcoeXJ/MBlvK4JLzm3gGddr8WAGgn2r7IN7+XMzOx+1WotqzRRETUu1sdXrYj4C+dsGiMb17wc6kFj8070J2mDXIBDvE+RU/Vt2nH5taowdhU3qW5QAL8a2pmDnNP26b6W2RXSM+9NYBMIZ2DuVYvuCTvy5cgyZIRREoCren/LTKwuLlvP6j5NbirokVl05lD0g4OZdfVf4D245ndhdVndx7N5XGB21q+YVg==",
+            "attachment": "rZ/YendG3hilQTN2MpWaYcndEY1tGfxHG8/0mQeryXceGrQFpK1rEG59+3iG5JDkQuTBZiFdvfs7FPYnd+HPCiiWfvt06/8WEjqqlSzeRil9LhjpsPq7yQbXuwuII/tR88mMLgrvRWzixvvsAqTNJRu2I4xsZRuR1ab9lOOZaWKC+qDxXPBXhvxEzIE0wdoo0RmYuDWO7hAtCUiJVlGuNbC9wQTI2NqXUDCuF4AUYmTXiDYIQ/kjt1enOa8jDOsqUx4zbH+FVDsgtbAQC6zxxRFSrmuAJ0pr9kTFqFQbcqdpPj4YxCdR8B2KCnYd/4Fx5zNbslcMzju/2XFNQtovx8IknS0HCy2wwE27yq+IRAlvVTSvEVcixDFAZOWrXw/VvxjwcnNiYXKSqbwcbAUC5oAAeeIP+8a1g+5wGO/CpwSjIU5Unda6k8YW0A2EF/S+kh2nZ2g3Eoo34mif/gBJhGgnCIKda1RJrpwwEpyjhN9ynh9C5LXXcGKvTm/B10p+NsdfcWX2S8hpbmP+vRdMBG5A89nvhK0A+IVTbShPKRL/jD9P2UwdmHX5CNU73QA3Kzi6hPbft5BbwORL2NlshL1CFeMe3VxOUcIOo8/+27aFT6IX27H/FEhaCBEwsnN0+q/QdDXgY7TaihzR6K9qf0x7Xzyyd8f3PkDMn9YotpAB7d9RAF9rhMWtZgvrJ6S1jxDN8JQH1aaEZ82AwUliv7wGTVwAmBevjV5DPS3ZOYq+fFhhBIF7SJCkJPYJ7AWY45pEvJf0tEahj9A3A1acUdcPnGTdsP1yoslxW7D+11aXs423Nti2mgegP6Pr4QX/MGnUI5nW3mggMpEIG3SvLClolXJWOqNU+X9UXOH00qUbzn3Rr/SDxF6EA8Xysi0NK+bYhEysOeQjyenjTlgJoqOzoCrA/viKjqa9/yoeeKb0CJPse60le1mmxJOBop+FszNACHxGSul0B5JDscCwUdvm+WJ7FIEtJyT45SXAcC5W1k2pgWmsKXyzZYQgpNmmIw4ErfU2MkuJkqg2t7vL1y0Azaf9BkciUUdUsLazDZzv49fIrICCnT5kzZNk2JZtfkm6eP0paqisNmLbiVtFbyW/C7tlsuK2RMLZ2pL4mGZW8e/InEG1Sbuv5rR/uubYup2lGAPqlDWEKSR70HjnE7PVW+tQ9TCmdP2oW1N+o4O8I27e/kR5UQ3LX2q3VqCsscDOs3lR9e+6ycSQ/M6CJLcDn+iAA03NVhnJ7CjHayoJJjmivCfrFoCVlC5iUOJAOr+xNr7sVqNoRb0byOngo/7TSWw9Sj7f3nwjsAy+4lBq4O815oNHhFyuyX+OLl95nutN+aQRrwlzmkCLBbytozqMUybkXWu1AVn9WYv9hHwyN6h7CLie2JSvfnv2tW7sdIL83rhs6FR8etJkWwFvc/txjMiLcSejyddXbe73zUOorbsct4Sm0zkcWSd+sy7sgNserUz+e9kQewPNF7v6UeNCvIDAHZQ8Lh+F612s8CsEIEO6X76eHqFPBPwOI/Wyo/vab8hEgcqWYAHCpxOinV0u+/RIt13qlPi2t7now1zhnBwYLP9sdEsLceImO2OPbttb4U3mkwFlClGtnNJuIlkn45oHCwJs9V/+HyGEeZCxq9fnMmyUymHcGjj3PtfpcaajXBL6BNbuAr4g/KWwyY1q8UWRoAmWn6a9qW+doqvdX1U7NLMT8DCuY5f4K3Bb3JOwf+0CkT1mcq9MmHkvqwrRJ/IKE1m5qYpgAmjVDgDgDNwvSZT19kYQ6/zOBV3uNeXyQvBa7iHDQCshNyezvRDYsWUTlyqkdWyjQKUFCDkM6I9IjEHffc+sNtZrPn8SyvgDUUXGacD4meihUT4E0sa2RMjvQLHy8SIsQpdPTLk=",
+            "created_at": 1751065615,
+            "deleted_at": 0,
+            "client_message_id": null,
+            "prev_id": 0,
+            "referer": 3,
+            "supplement": "",
+            "v": {
+              "enc": 31,
+              "modifyRevision": 0,
+              "isMine": false
+            }
+          }
+        ]
+      },
+      {
+        "name": "chat_rooms",
+        "structure": {
+          "name": "chat_rooms",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "type",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "members",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "active_member_ids",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "last_log_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "last_message",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "last_updated_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "unread_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "watermarks",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 10,
+              "name": "temporary_message",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 11,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 12,
+              "name": "ext",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 13,
+              "name": "last_read_log_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 14,
+              "name": "last_update_seen_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 15,
+              "name": "active_members_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 16,
+              "name": "meta",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 17,
+              "name": "is_hint",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 18,
+              "name": "private_meta",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 19,
+              "name": "last_chat_log_type",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 20,
+              "name": "schat_token",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 21,
+              "name": "last_skey_token",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 22,
+              "name": "last_pk_tokens",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 23,
+              "name": "link_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 24,
+              "name": "moim_meta",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 25,
+              "name": "invite_info",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 26,
+              "name": "blinded_member_ids",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 27,
+              "name": "mute_until_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 28,
+              "name": "last_joined_log_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 33,
+        "samples": [
+          {
+            "_id": 1,
+            "id": 440387067254143,
+            "type": "DirectChat",
+            "members": null,
+            "active_member_ids": "[73808891]",
+            "last_log_id": 3724348518903689216,
+            "last_message": "YSkS5/zpduMru6sKBlWcm6Z1tvLK1d3unmJ9hheCCUQ=",
+            "last_updated_at": 1764914141,
+            "unread_count": 0,
+            "watermarks": null,
+            "temporary_message": null,
+            "v": {
+              "pushAlert": true,
+              "chat_referer_type": 0,
+              "enc": 31
+            },
+            "ext": null,
+            "last_read_log_id": 3724348518903689216,
+            "last_update_seen_id": 3724348518903689216,
+            "active_members_count": 2,
+            "meta": null,
+            "is_hint": null,
+            "private_meta": null,
+            "last_chat_log_type": 2,
+            "schat_token": 0,
+            "last_skey_token": 0,
+            "last_pk_tokens": null,
+            "link_id": -1,
+            "moim_meta": null,
+            "invite_info": null,
+            "blinded_member_ids": null,
+            "mute_until_at": -1,
+            "last_joined_log_id": -1
+          },
+          {
+            "_id": 2,
+            "id": 442874471149677,
+            "type": "DirectChat",
+            "members": null,
+            "active_member_ids": "[185081014]",
+            "last_log_id": 3629998846263345153,
+            "last_message": "NX+1U8cSzIkTVyE/2Pm5jfv7uL4dRW9o98haL/e+BvIw1OkjxJEXOJypKOZIE17AiedBxw/Skr4W5etzogQ7HUVA3VXmmzzEYj+q3sVNvA8mVu5YpsSyjb1kOuOS2pGHa1eQlMvRXh/PiuVfFCAXSwOMyuzkMYP/Yigv57e/F90fZrIv/+9vonf49J6S+HGyc/GsSTAQwvnHN1t4k/YcI12HxJjTeo/xuq2iFWUFIzdhcH6eoDny+M1YdjeHqTxqOLXMpDswB3a3QPpmPkq9XmnizTvVkPBSCZCO4gZ1/2DDkluTHroW3eyZfxqxF/agzyaWiNCjo93j7pFkTj1on0OzIwrCMp9GYxHnwiZHAiXPgN12sPDUksGE8/8lm/5JiKKkbetQXAVoDBdtdbLv2ZmgJXmbQXIUhAJ+6DmedfJeSs8aW/gJjDTHzEe6IEII",
+            "last_updated_at": 1753666783,
+            "unread_count": 0,
+            "watermarks": null,
+            "temporary_message": null,
+            "v": {
+              "pushAlert": true,
+              "chat_referer_type": 0,
+              "enc": 31,
+              "display_user_ids": ""
+            },
+            "ext": null,
+            "last_read_log_id": 3629998846263345153,
+            "last_update_seen_id": 3629998846263345153,
+            "active_members_count": 2,
+            "meta": null,
+            "is_hint": null,
+            "private_meta": null,
+            "last_chat_log_type": 1,
+            "schat_token": 0,
+            "last_skey_token": 0,
+            "last_pk_tokens": null,
+            "link_id": -1,
+            "moim_meta": null,
+            "invite_info": null,
+            "blinded_member_ids": null,
+            "mute_until_at": -1,
+            "last_joined_log_id": -1
+          },
+          {
+            "_id": 3,
+            "id": 444010411857430,
+            "type": "DirectChat",
+            "members": null,
+            "active_member_ids": "[56272012]",
+            "last_log_id": 3641626308000757761,
+            "last_message": "COSTziitWBj+5U5qTum6Nsuy5YgJdeAjpwbG4Mr/aco=",
+            "last_updated_at": 1755052885,
+            "unread_count": 0,
+            "watermarks": null,
+            "temporary_message": null,
+            "v": {
+              "pushAlert": true,
+              "chat_referer_type": 0,
+              "enc": 31
+            },
+            "ext": null,
+            "last_read_log_id": 3641626308000757761,
+            "last_update_seen_id": 3641626308000757761,
+            "active_members_count": 2,
+            "meta": null,
+            "is_hint": null,
+            "private_meta": null,
+            "last_chat_log_type": 27,
+            "schat_token": 0,
+            "last_skey_token": 0,
+            "last_pk_tokens": null,
+            "link_id": -1,
+            "moim_meta": null,
+            "invite_info": null,
+            "blinded_member_ids": null,
+            "mute_until_at": -1,
+            "last_joined_log_id": -1
+          }
+        ]
+      },
+      {
+        "name": "chat_sending_logs",
+        "structure": {
+          "name": "chat_sending_logs",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "type",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "chat_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "thread_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "scope",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "message",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "attachment",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "client_message_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "supplement",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 10,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 11,
+              "name": "is_silence",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "chat_threads",
+        "structure": {
+          "name": "chat_threads",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "chat_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "thread_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 2,
+              "name": "last_chat_log_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "last_read_log_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "last_display_log_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "mentioned_chat_log_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "new_chat_log_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "has_mention",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "has_new",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "is_participating",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 10,
+              "name": "count",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 11,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "public_key_info",
+        "structure": {
+          "name": "public_key_info",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "user_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "pub_key_token",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "encrypt_key",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "sign_key",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "chain_sign",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "create_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "pk_set_token",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "room_master_table",
+        "structure": {
+          "name": "room_master_table",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "identity_hash",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 1,
+        "samples": [
+          {
+            "id": 42,
+            "identity_hash": "98073cb80d7b2c582f16973d8096c1f6"
+          }
+        ]
+      },
+      {
+        "name": "secret_key_info",
+        "structure": {
+          "name": "secret_key_info",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "chat_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "secret_key_token",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "secret_key",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "create_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "sqlite_sequence",
+        "structure": {
+          "name": "sqlite_sequence",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "name",
+              "type": "",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 1,
+              "name": "seq",
+              "type": "",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 3,
+        "samples": [
+          {
+            "name": "chat_rooms",
+            "seq": 36
+          },
+          {
+            "name": "chat_logs",
+            "seq": 9742
+          },
+          {
+            "name": "chat_sending_logs",
+            "seq": 549
+          }
+        ]
+      },
+      {
+        "name": "warehouse_info",
+        "structure": {
+          "name": "warehouse_info",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "chat_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "name",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "description",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "profile_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "host_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "accessible_pre_chat",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "members_invitable",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "status",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "revision",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 10,
+              "name": "is_show_welcome",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 11,
+              "name": "accessible_log_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 12,
+              "name": "user_delete_all_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 13,
+              "name": "create_at",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 14,
+              "name": "warehouse_backup_status",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 15,
+              "name": "ai_chat_bot_management_role",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 16,
+              "name": "permission",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 17,
+              "name": "staff",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 18,
+              "name": "pinCode",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 19,
+              "name": "pinCode_expired_at",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 20,
+              "name": "restrictions",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      }
+    ]
+  },
+  "db2": {
+    "database": "main",
+    "tables": [
+      {
+        "name": "android_metadata",
+        "structure": {
+          "name": "android_metadata",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "locale",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 1,
+        "samples": [
+          {
+            "locale": "ko_KR"
+          }
+        ]
+      },
+      {
+        "name": "call_log",
+        "structure": {
+          "name": "call_log",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "call_log_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "chat_room_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "call_nested_count",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "last_call_type",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "is_my_chat_log",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "last_call_time",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "chat_log_bookmarks",
+        "structure": {
+          "name": "chat_log_bookmarks",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "bookmark_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "chat_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "chat_log_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "chat_message_type",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "bookmark_memo",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "chat_log_meta",
+        "structure": {
+          "name": "chat_log_meta",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "log_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "chat_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "link_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "content",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "revision",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 45,
+        "samples": [
+          {
+            "log_id": 3732463385231147009,
+            "chat_id": 18469584418690487,
+            "link_id": 440106185,
+            "content": "{\"1\":{\"content\":{\"2\":1},\"revision\":3732469174585533653}}",
+            "revision": 3732469174585533653
+          },
+          {
+            "log_id": 3732463839415549956,
+            "chat_id": 18469584418690487,
+            "link_id": 440106185,
+            "content": "{\"1\":{\"content\":{},\"revision\":3732471794616246771}}",
+            "revision": 3732471794616246771
+          },
+          {
+            "log_id": 3732464751601172481,
+            "chat_id": 18469584418690487,
+            "link_id": 440106185,
+            "content": "{\"1\":{\"content\":{},\"revision\":3732471804355046171}}",
+            "revision": 3732471804355046171
+          }
+        ]
+      },
+      {
+        "name": "emoticon_instant_keyword",
+        "structure": {
+          "name": "emoticon_instant_keyword",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "kid",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "last_used_at",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "use_count",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "emoticon_keyword_dictionary",
+        "structure": {
+          "name": "emoticon_keyword_dictionary",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "keyword_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "keyword",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "matching_texts",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "hint_icon",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "related_ids",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 4211,
+        "samples": [
+          {
+            "keyword_id": 1,
+            "keyword": "ㅋㅋ",
+            "matching_texts": "ㅋㅋㄹㅃㅃ,크크루삥뽕,쿠쿠루삥뽕,루삥뽕,ㅋㅋ루삥뽕,ㅋㅋ,alol,Alol,ALOL,rofl,Rofl,ROFL,얔,앜,웤,핰,아앜,어앜,아앆,아잌,으앜,진짴,진쨬,흐앜,터짐,터졌,빵터짐,빵터졌,아터짐,아터졌,아빵터짐,아빵터졌,완전터짐,완전터졌,완전빵터짐,완전빵터졌,웃,웃었,웃다,웃고,웃기,욱기,폭소,웃음,배꼽,으헬,우헬,푸헬,끄헬,후헬,크헷,크헬,크헿,컿,컿!",
+            "hint_icon": "https://item.kakaocdn.net/dw/4446705.thum_002.png",
+            "related_ids": "256,225,1175,1170,875,1173",
+            "v": ""
+          },
+          {
+            "keyword_id": 2,
+            "keyword": "헤헤",
+            "matching_texts": "헤헤,헤엣,헤헿,헤헷,에헤,엣헤,에헷,에헿,으헤,으헷,으헿,우헤,우헷,우헿,흐헤,흐헷,흐헿,후헤,후헷,후헿,호헤,호헷,호헿,히헷,히헿,헤,헤..,헤...,헤!,헿,헿..,헿...,헿!,헷,헷..,헷...,헷!,hehe,HEHE,Hehe",
+            "hint_icon": "https://item.kakaocdn.net/dw/2229685.thum_024.png",
+            "related_ids": "20,98,170,3,1634,874",
+            "v": ""
+          },
+          {
+            "keyword_id": 3,
+            "keyword": "미소",
+            "matching_texts": "미소,함박미소,인자한미소,생글,싱긋,씽긋,방긋,빵긋,방글,빵글,싱글벙글,빵싯,급방긋,급빵긋,헤실,베실,배실,방실,헤벌쭉,헤벌죽,벌쭉,셀쭉,샐쭉,쌜쭉,베시시,배시시,헤레,실실,피시시,웃는상,으흐,온화,화색",
+            "hint_icon": "https://item.kakaocdn.net/dw/2222021.thum_002.png",
+            "related_ids": "1634,978,1923,2,119,586",
+            "v": ""
+          }
+        ]
+      },
+      {
+        "name": "expiring_media_alarm_log_chat_log_mapper",
+        "structure": {
+          "name": "expiring_media_alarm_log_chat_log_mapper",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "alarm_log_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "chat_log_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 2,
+              "name": "kage_token",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 3,
+              "name": "type",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "chat_log_created_at",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "expiring_media_alarm_logs",
+        "structure": {
+          "name": "expiring_media_alarm_logs",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "control_policy_n",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "control_policy_d",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "control_policy_e",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "control_policy_h",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "control_policy_m",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "is_read",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": "0",
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "favorite_emoticons",
+        "structure": {
+          "name": "favorite_emoticons",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "item_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "emot_idx",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 2,
+              "name": "item_resource",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "file_path",
+        "structure": {
+          "name": "file_path",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "token",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "name",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "path",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "friends",
+        "structure": {
+          "name": "friends",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "contact_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "type",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "uuid",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "phone_number",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "raw_phone_number",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "name",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "phonetic_name",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "profile_image_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 10,
+              "name": "full_profile_image_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 11,
+              "name": "original_profile_image_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 12,
+              "name": "status_message",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 13,
+              "name": "chat_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 14,
+              "name": "brand_new",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 15,
+              "name": "blocked",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 16,
+              "name": "favorite",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 17,
+              "name": "position",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 18,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 19,
+              "name": "board_v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 20,
+              "name": "ext",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 21,
+              "name": "nick_name",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 22,
+              "name": "user_type",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 23,
+              "name": "story_user_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 24,
+              "name": "account_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 25,
+              "name": "linked_services",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 26,
+              "name": "hidden",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 27,
+              "name": "purged",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 28,
+              "name": "suspended",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 29,
+              "name": "member_type",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 30,
+              "name": "involved_chat_ids",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 31,
+              "name": "contact_name",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 32,
+              "name": "enc",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 33,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 34,
+              "name": "new_badge_updated_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 35,
+              "name": "new_badge_seen_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 36,
+              "name": "status_action_token",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 37,
+              "name": "access_permit",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 38,
+              "name": "suspected_impostor",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 22,
+        "samples": [
+          {
+            "_id": 2,
+            "contact_id": null,
+            "id": 134235474,
+            "type": 1,
+            "uuid": "az090r2AV2ctnklc9e3SNR9U05vR4W5avliereM/9wRbE4hQUqbA5mSARqMhmNYb",
+            "phone_number": "",
+            "raw_phone_number": null,
+            "name": "avFDzJjA4emBQ+dw3Y+tVSdIv/PSqvFoTzssctwrNDvMZtozXVYErNgxfYFSEfLQ",
+            "phonetic_name": null,
+            "profile_image_url": "CVlZYm8Bi4MvxnwVJajU/pi3fZQljWAttYnV9zxqjr3BqVMbCblhf5Uv0tjFwKqCysAbW/xMzRjaoceyq5HfuHVn3TzdC8eNPqktnHVO/XYhflogznpKKRxp6GfhA9J3",
+            "full_profile_image_url": "CVlZYm8Bi4MvxnwVJajU/pi3fZQljWAttYnV9zxqjr3BqVMbCblhf5Uv0tjFwKqCysAbW/xMzRjaoceyq5HfuBF9VOXlMzu/JIq7Z2mTWg5W26r+wGu9Td34ruGhtwnU",
+            "original_profile_image_url": "CVlZYm8Bi4MvxnwVJajU/uI8ifl0bv8nyk9++SnffRa61vZ17Qg90ITvkPj3f9/QuMN3C1hSxXu7MjgSMYRVnD5yTtB8RTFtC2o/+8rR8J8=",
+            "status_message": "qAZZDMprA/NGauwb94JU+riM/9NZWpJFlD0x+3jPG1nb+hbAhZJz8Rky9FauF2dOVijFHscNnr5OWhvg6dfo/g==",
+            "chat_id": 4954765559615798,
+            "brand_new": 0,
+            "blocked": 0,
+            "favorite": 0,
+            "position": 0,
+            "v": "299T6GOFc/D2dErKii26xFFSU4Yx2J6aw1rY1iwZwH5YtNSdJ1p9syofDUH7ILnoc2DfbruWB7ohAJTyZt/zAG3u8L0NPN/J4MTCQjk8xncfzslsHvTm7DociEPLCMrNH/IFwq5FanB7gbODtwEZ854h5m+gE3bnzTDDBbPTI/Nvt6Toqrmmt8t1yyZwDP5ykXw9Z1RlLZ8NmgOcHPmZJ9JyXlkJd5gNJkPrh+Sd5fLv6AtbW24uQ2ypuK02mCANuDS+oY3+xcPQTSVu+EbaXvL7lNbidrPRQyUk28KWPe17Z+WQ4Ychx4UIEEoQCL8bvGiK5Tp+ri82t2UcC6JoWUgxo36ux/LGLPIh6XwL6uI/sgb2pg8YeCba3riwcUvM62aBG19ZqFiMlSK5NeGEymdDTHAEkALDIcp35jF4vlr7M+id8HP4EmSjow0j6FNd8OmyvvjRFGiCFEzWGqgEb5o7HxPc2n/pFXKQZ+kvAF/aSZHkuE+puu4sK+UVaVEDFzhyvQgVIVh16vBqnaYsj6WkrBDSCVncKqUYPrKkG5IYKZKXzjoriINs+YddlbS4qbAlLiqfMv3PMt0N8bUIB1bImBMZOIMriqy7SkVQ4OXDHDmsIUgm65SZ3qhH/mSyg/I631vKIArZXrTHfBANUbCfIXgz8TiQBzGIGLg5yJEG931gua1TZDLeB9xDY/tdZxRPLb9rCArZ4q/ZOQR56xraibIA0htASx3da8/mddw=",
+            "board_v": "{}",
+            "ext": "O5ZBF8eGW1Q8icgEHpABsZzcxURrhjA0ihsiynUg4me1jRd1Jz6mlKGFj8Cd/MqJLXtLTUyLKzUiNjsRelLhlGkKEPKG+coIBZfNU7SiJD8jIMxhzYYA6RSJfkwl8/vxCj4HZ4ad92N/7TvFSiJLGUW7d2PA/cOdw9/cHj3+InH3MEU1+FLokZAWJ6BOffaGqC2OX9DeSHGp4D3/9D6Y2umqlCoCuUnkjkvFnNQ2EXQeo/0O/nBtwEHzJfZcC/FYbJjZTNo/D3M3jf4X6xmxEQ==",
+            "nick_name": null,
+            "user_type": 1,
+            "story_user_id": null,
+            "account_id": 0,
+            "linked_services": null,
+            "hidden": 0,
+            "purged": 0,
+            "suspended": 0,
+            "member_type": 0,
+            "involved_chat_ids": "[4954765559615798]",
+            "contact_name": null,
+            "enc": 31,
+            "created_at": 0,
+            "new_badge_updated_at": 0,
+            "new_badge_seen_at": 0,
+            "status_action_token": 0,
+            "access_permit": null,
+            "suspected_impostor": 0
+          },
+          {
+            "_id": 3,
+            "contact_id": null,
+            "id": 223872471,
+            "type": -999999,
+            "uuid": null,
+            "phone_number": "",
+            "raw_phone_number": null,
+            "name": "ez+rH3YtSBqpA8rxLamXDw==",
+            "phonetic_name": null,
+            "profile_image_url": "CVlZYm8Bi4MvxnwVJajU/pi3fZQljWAttYnV9zxqjr1IZC7nme5Ufib70dhhz6Cse9AZtVX0bZ/yVDYVu1SsjLp4CaEk147WXUVr4WrYCDBoBNIMssxqTFkrQXXEJRLZ",
+            "full_profile_image_url": "CVlZYm8Bi4MvxnwVJajU/pi3fZQljWAttYnV9zxqjr1IZC7nme5Ufib70dhhz6Cse9AZtVX0bZ/yVDYVu1SsjILGxeODQx1ZhEO1IUw4UVGxZ4EMu3AvoZcRskZDuznQ",
+            "original_profile_image_url": "CVlZYm8Bi4MvxnwVJajU/oJqqy/Na65k/pI5+sMuK3R2ewZAefo1PJicuyfCRQz0emQXSrGR3+t2NCms0vfnYIUJNyiRLthHWwmcSA7w8lg=",
+            "status_message": null,
+            "chat_id": 0,
+            "brand_new": 0,
+            "blocked": 0,
+            "favorite": 0,
+            "position": 0,
+            "v": "299T6GOFc/D2dErKii26xFFSU4Yx2J6aw1rY1iwZwH5YtNSdJ1p9syofDUH7ILnoc2DfbruWB7ohAJTyZt/zAG3u8L0NPN/J4MTCQjk8xncfzslsHvTm7DociEPLCMrNH/IFwq5FanB7gbODtwEZ854h5m+gE3bnzTDDBbPTI/Nvt6Toqrmmt8t1yyZwDP5ykXw9Z1RlLZ8NmgOcHPmZJ9JyXlkJd5gNJkPrh+Sd5fLv6AtbW24uQ2ypuK02mCANuDS+oY3+xcPQTSVu+EbaXvL7lNbidrPRQyUk28KWPe17Z+WQ4Ychx4UIEEoQCL8bvGiK5Tp+ri82t2UcC6JoWUgxo36ux/LGLPIh6XwL6uI/sgb2pg8YeCba3riwcUvM62aBG19ZqFiMlSK5NeGEymdDTHAEkALDIcp35jF4vlr7M+id8HP4EmSjow0j6FNd8OmyvvjRFGiCFEzWGqgEb5o7HxPc2n/pFXKQZ+kvAF/aSZHkuE+puu4sK+UVaVEDFzhyvQgVIVh16vBqnaYsj6WkrBDSCVncKqUYPrKkG5IYKZKXzjoriINs+YddlbS4qbAlLiqfMv3PMt0N8bUIB1bImBMZOIMriqy7SkVQ4OXDHDmsIUgm65SZ3qhH/mSyg/I631vKIArZXrTHfBANUbCfIXgz8TiQBzGIGLg5yJEG931gua1TZDLeB9xDY/td0DHZ1E8K2zo8cwY8wnloog==",
+            "board_v": null,
+            "ext": null,
+            "nick_name": "ez+rH3YtSBqpA8rxLamXDw==",
+            "user_type": 1,
+            "story_user_id": null,
+            "account_id": 0,
+            "linked_services": null,
+            "hidden": 0,
+            "purged": 0,
+            "suspended": 0,
+            "member_type": 0,
+            "involved_chat_ids": "[4958753949237558]",
+            "contact_name": null,
+            "enc": 31,
+            "created_at": null,
+            "new_badge_updated_at": null,
+            "new_badge_seen_at": null,
+            "status_action_token": 0,
+            "access_permit": null,
+            "suspected_impostor": 0
+          },
+          {
+            "_id": 4,
+            "contact_id": null,
+            "id": 212993479,
+            "type": -999999,
+            "uuid": null,
+            "phone_number": "",
+            "raw_phone_number": null,
+            "name": "NgwciPNigJKqKX4ITS2KSw==",
+            "phonetic_name": null,
+            "profile_image_url": "CVlZYm8Bi4MvxnwVJajU/pi3fZQljWAttYnV9zxqjr3uY8qFGHbZvczRvn+GDzyvunkzosjeTu6q0MjIvYIAjvdsOUg+Pp4CUCQfiQTi7JfU3saBhbjPPsGSS1V6jzi9",
+            "full_profile_image_url": "CVlZYm8Bi4MvxnwVJajU/pi3fZQljWAttYnV9zxqjr3uY8qFGHbZvczRvn+GDzyvunkzosjeTu6q0MjIvYIAjrfKh0STVwpUwWqYiNExzA04qmzqo9FAkKU/0H1ftbyO",
+            "original_profile_image_url": "CVlZYm8Bi4MvxnwVJajU/nBh37XViTLm7eW8kxWWHL/ND8VRAMTZL9GPowuqnIuismdesBOEV/AdphaO8y5nioKpa2/Z4zA4MFYlhSNB2M4=",
+            "status_message": null,
+            "chat_id": 0,
+            "brand_new": 0,
+            "blocked": 0,
+            "favorite": 0,
+            "position": 0,
+            "v": "299T6GOFc/D2dErKii26xFFSU4Yx2J6aw1rY1iwZwH5YtNSdJ1p9syofDUH7ILnoc2DfbruWB7ohAJTyZt/zAG3u8L0NPN/J4MTCQjk8xncfzslsHvTm7DociEPLCMrNH/IFwq5FanB7gbODtwEZ854h5m+gE3bnzTDDBbPTI/Nvt6Toqrmmt8t1yyZwDP5ykXw9Z1RlLZ8NmgOcHPmZJ9JyXlkJd5gNJkPrh+Sd5fLv6AtbW24uQ2ypuK02mCANuDS+oY3+xcPQTSVu+EbaXvL7lNbidrPRQyUk28KWPe17Z+WQ4Ychx4UIEEoQCL8bvGiK5Tp+ri82t2UcC6JoWUgxo36ux/LGLPIh6XwL6uI/sgb2pg8YeCba3riwcUvM62aBG19ZqFiMlSK5NeGEymdDTHAEkALDIcp35jF4vlr7M+id8HP4EmSjow0j6FNd8OmyvvjRFGiCFEzWGqgEb5o7HxPc2n/pFXKQZ+kvAF/aSZHkuE+puu4sK+UVaVEDFzhyvQgVIVh16vBqnaYsj6WkrBDSCVncKqUYPrKkG5IYKZKXzjoriINs+YddlbS4qbAlLiqfMv3PMt0N8bUIB1bImBMZOIMriqy7SkVQ4OXDHDmsIUgm65SZ3qhH/mSyg/I631vKIArZXrTHfBANUbCfIXgz8TiQBzGIGLg5yJEG931gua1TZDLeB9xDY/td0DHZ1E8K2zo8cwY8wnloog==",
+            "board_v": null,
+            "ext": null,
+            "nick_name": "NgwciPNigJKqKX4ITS2KSw==",
+            "user_type": 1,
+            "story_user_id": null,
+            "account_id": 0,
+            "linked_services": null,
+            "hidden": 0,
+            "purged": 0,
+            "suspended": 0,
+            "member_type": 0,
+            "involved_chat_ids": "[4958831388448286]",
+            "contact_name": null,
+            "enc": 31,
+            "created_at": null,
+            "new_badge_updated_at": null,
+            "new_badge_seen_at": null,
+            "status_action_token": 0,
+            "access_permit": null,
+            "suspected_impostor": 0
+          }
+        ]
+      },
+      {
+        "name": "geo_location_log",
+        "structure": {
+          "name": "geo_location_log",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "usedAt",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "osVersion",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "purpose",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "inapp_browser_url",
+        "structure": {
+          "name": "inapp_browser_url",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "title",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "url",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "item",
+        "structure": {
+          "name": "item",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "category",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "set_order",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "enc",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 6,
+        "samples": [
+          {
+            "id": "1200282",
+            "category": 12,
+            "set_order": 0,
+            "enc": 31,
+            "v": "MyovKW5qGZXRb78q/JcvjUlvKQik9GWgfD+J8TG49dvgqtNpBCok247aqYEGLY8BWUeYAhvCGmYqcTLbAbvDWHw/0hhqxZXQkXC+Nf9TB1z+iBD3Qzx2XbQqWzT3V25Hhz9FpoaLzdkM2HWKVB2pq10ikep/EZhZmDobz0rop27MdQMxFrGC1FiNfeP7hm9UP/I+js8Hk5n9c1XRQFY42kEV+3/Leiz9SUuWC7lSmWqBnE58pdShaobWCM+LF3Rhc1cr3jiSEUqFsZDGyO52WaMiggkHa41vqxBslPyAPSYDd24WCalx32Rdvuxfiyvzsgqo/ndijhhCscynRn9f0JOKR++sxGLTpUrQIkCN4/Dw4JvYKpYh0YB+ejtxiLF7S0pmOEmaiinrYW/9qqJsTXDtSR+p9nnq89Z9vBQvhmOpEjm4QGIF28bwg5shP7+3ZyzXKUJ8WAvzlzn1C2OVWPqnOGcfoTH8irqDAdH0sE8mfyoOaKenk5nzQh5tZUCqZuCGE9RAUQInN9FnLOgdziKLrflAbmtstz7eE/R+x7uTHh35AuLA8uDRVJO0hE+XtFse4hZnoz30jUsqxhlouA=="
+          },
+          {
+            "id": "1200283",
+            "category": 12,
+            "set_order": 1,
+            "enc": 31,
+            "v": "MyovKW5qGZXRb78q/JcvjUlvKQik9GWgfD+J8TG49dvgqtNpBCok247aqYEGLY8BWUeYAhvCGmYqcTLbAbvDWB5RDcRqeollb3dCdlP4+0VHGugOEr7jkcNzq/jvT+U4vpIKBWcun3mANhemqqsN5NZKzPmQVdwOqEM985prNHUT/YTTSCckf/0mM2S7WiQH/Ny6yATSrUOFVdCc0foLx/lixDa1HnbQiN6DEwbcBnYUGPyuHELx3ZWPC9M3scfaPcqQ9oGHlEJzPyAEnO6Kp2yN1yhMLP6hJuzfe+nzovTdWqJ95WnsxVrC7ViFhc88hhSW3OjQpBR2Szd7aF0CRz8jgwqMt2vRdsW6zP6F8gigAfLYidwGiF3v+lCS1s6k5z0qqjjXoFLfhPYTorqQLFzNrNVjD8mSoqeJnXwSoDa1vV1kcVXKZHfbrzds3FPbyI8xwDESnUaaeBnXlvvfIkuJL3jrogXMFCeh0tM4aM2iJWmhECu7a41h8KjKPbQIOZE8/b5/v54jhQJLj9/v2FCJPisRJOJBPsNdhCPsuKQ650SpKvN3cNThBKhzUkomKkjKsVTUsCk4s5sCCmkZ0w=="
+          },
+          {
+            "id": "1200281",
+            "category": 12,
+            "set_order": 2,
+            "enc": 31,
+            "v": "59pGDkwY6AJsD0AAgGQQ3NFaqD75DfOuTsKon9NXAj9xjiFHnw4VQmsEx1p1CVcRyKk62GMyHn0x3QhrrEiuN5zy/jc7cDjlP6R8Zbd8VQIm0WkD7zyNveIUsdr+MoH/EHqd/4KPLMRr9suFMtF5SH9m67S9tzLn9hWSrHIJCQIsETRGzCGfKqFu3fP9JXs5X97L6jxIMweo01H9jfIdaqDcLuw9Z0cZ8Q88kHwTv5p7H9c0NZfKAMy7ga/Ck+YzWOxPUqZv7nfrw1hQzHUFrG1DHeHICx9pOzNtA1pVhfqbDgeNO79npgZUta9BxV1x26ZCzuATS0VlsUMx7Br75W1jZg34RHZ9iRkmOvjBVVEPugp8pvhWltW2nsHT0rGLtE1sqPtzRpRaDyaiVcMTZnXscsw7qfKlgMOX0z0IuhH1ZkgOR0+SMLPqgo6m7VHYyBufRQyHr1mr73x0jkyeyTGWcJcIJeKKEr7CAbhEzVTuP8lGJOk7zAW02SWvE52T7NxzmFzJkp9M4gDKHAQdUTAI7CDRMDATXLKsDRAJPlDVUKUZNFw+N0U/DXpF2KtU"
+          }
+        ]
+      },
+      {
+        "name": "item_resource",
+        "structure": {
+          "name": "item_resource",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "item_category",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "item_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "enc",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 310,
+        "samples": [
+          {
+            "_id": 1,
+            "item_category": 12,
+            "item_id": "1200282",
+            "enc": 31,
+            "v": "cpUVyCN0CCgNSsPGbr6Z81GTbeswz7hmH2hlwjOrZ/ijXhnTuyqRiKCk+yN+9QDRFhMV4ldh4LquNjkcUS8NcwxjIzOP2vNLsJEhuCfk4JhokBt9JcZzjcBomPOEmkEVDhrsBTvVvAk0EY0mT+jg0LNddxgvfxSLeSLmhwHzR9WYB6j3A7qb46jIU0Shy0CqDIHQDna4Jo+VJzVAr/oGDU1k09KhRpX8jAtwN/6vpb+OlXSX78Au6YCU+cZ98Jc+"
+          },
+          {
+            "_id": 2,
+            "item_category": 12,
+            "item_id": "1200282",
+            "enc": 31,
+            "v": "syjJqKayu1Qyv1O/vuLCy4B6eZ+tTwg8dVKvv2881r41ikDwqu7AyQsNGegym2IftwnvGVLEjRabZAHh+hRxfAau5h+H40x0wZvR8F2fMOeSeo+uyzC/aRo8WNcjKx17PL2HZAHeJefQ8u2xWG78eO9duCtfP52G17uoki0b4BmdlSSbXq1AlH6o9h3VgAX8EYOYLhL4BnX+4IWxcevXEER+XILxD1nbtGBS8OwPvKEefk4rrIxaHiAg6VVJPiU4"
+          },
+          {
+            "_id": 3,
+            "item_category": 12,
+            "item_id": "1200282",
+            "enc": 31,
+            "v": "kE98epm9VsEX0ly5U/RAbCCZ6bN0gr9D7Veo4ZLW4j59GrVT10p+aBX7/jBucXwSxG2gkBC3ccFcf5q0lu6gVrmbiirfg751/++e7Xm/rC4FnvHdmQ7RWAYollmfPfy1RXSWVm1XaLYqT7cf8UwVdDXxVJQ+m4GfHIYhpiW0uc6EiVu1Ax8au/vekwkYnL/lq60tXr9Mc+riKMQGNo4kEOZrZwSoxO0nd7/AMFe4D1mLgCTKOJ0k8Cp0SJjQP7NG"
+          }
+        ]
+      },
+      {
+        "name": "music_history",
+        "structure": {
+          "name": "music_history",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "song_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "song_name",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "song_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "duration",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "album_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "album_name",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "album_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "album_thumbnail_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "artist_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "artist_name",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 10,
+              "name": "adult",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 11,
+              "name": "song_cache",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 12,
+              "name": "song_file_length",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 13,
+              "name": "song_order",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 14,
+              "name": "create_at",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 15,
+              "name": "play_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 16,
+              "name": "menu_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 17,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 18,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "music_playlist",
+        "structure": {
+          "name": "music_playlist",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "song_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "song_name",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "song_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "duration",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "album_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "album_name",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "album_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "album_thumbnail_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "artist_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 10,
+              "name": "artist_name",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 11,
+              "name": "adult",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 12,
+              "name": "song_cache",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 13,
+              "name": "song_file_length",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 14,
+              "name": "song_order",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 15,
+              "name": "create_at",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 16,
+              "name": "play_count",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 17,
+              "name": "menu_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 18,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "music_recent_playlist",
+        "structure": {
+          "name": "music_recent_playlist",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "title",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "writer",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "thumbnails",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "song_count",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "song_ids",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "open_chat_member",
+        "structure": {
+          "name": "open_chat_member",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "link_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "user_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "type",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "profile_type",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "link_member_type",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "nickname",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "profile_image_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "full_profile_image_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "original_profile_image_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 10,
+              "name": "involved_chat_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 11,
+              "name": "profile_link_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 12,
+              "name": "privilege",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 13,
+              "name": "report",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 14,
+              "name": "enc",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 2,
+        "samples": [
+          {
+            "_id": 6,
+            "link_id": 440106185,
+            "user_id": 4897202238384073231,
+            "type": 1000,
+            "profile_type": 4,
+            "link_member_type": 1,
+            "nickname": "EnmdCn3K/kxHc9v0PW0rg/K/cHp6J8PIDhTMTQUbHt8=",
+            "profile_image_url": "scXBxoLGVJ6BbII93qyLcXQuplXKQsH3ZY5Uzq/rx+hpdHH+mXH5OO7YizmTuQqy",
+            "full_profile_image_url": "scXBxoLGVJ6BbII93qyLcXQuplXKQsH3ZY5Uzq/rx+golFBxGvGuPm48MJ9TPlqU",
+            "original_profile_image_url": "scXBxoLGVJ6BbII93qyLcXQuplXKQsH3ZY5Uzq/rx+gL8pNQ8abdyhf+aym83E/W",
+            "involved_chat_id": 18469584418690487,
+            "profile_link_id": 0,
+            "privilege": 0,
+            "report": 0,
+            "enc": 31
+          },
+          {
+            "_id": 641,
+            "link_id": 440106185,
+            "user_id": 7868075556290245975,
+            "type": 1000,
+            "profile_type": 2,
+            "link_member_type": 2,
+            "nickname": "I29NzFMH4TMqYoP87Nvd46pP0BtZNvnLicXLlDRgCd4=",
+            "profile_image_url": "scXBxoLGVJ6BbII93qyLcRsQZLWaa8in5T7ZpVCn/4nOiK7jJfhEGTLCjx48CaOu",
+            "full_profile_image_url": "scXBxoLGVJ6BbII93qyLcRsQZLWaa8in5T7ZpVCn/4kV/sW3rmonRq+2J9JZvBik",
+            "original_profile_image_url": "scXBxoLGVJ6BbII93qyLcRsQZLWaa8in5T7ZpVCn/4kp91uNK2NbsNXjMWSugL7e",
+            "involved_chat_id": 18469584418690487,
+            "profile_link_id": 0,
+            "privilege": 0,
+            "report": 0,
+            "enc": 31
+          }
+        ]
+      },
+      {
+        "name": "open_link",
+        "structure": {
+          "name": "open_link",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "user_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "token",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "name",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "image_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "type",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "member_limit",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "direct_chat_limit",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "active",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 10,
+              "name": "expired",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 11,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 12,
+              "name": "view_type",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 13,
+              "name": "push_alert",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 14,
+              "name": "icon_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 15,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 16,
+              "name": "searchable",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 17,
+              "name": "description",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 1,
+        "samples": [
+          {
+            "id": 440106185,
+            "user_id": 4897202238384073231,
+            "token": 1766202546,
+            "name": "의운모",
+            "url": "https://open.kakao.com/o/grefw55h",
+            "image_url": "https://open.kakaocdn.net/dn/boR5kM/wooMwKOIxo/QE3islXxwt5L9UbwRkR4xk/img.jpg",
+            "type": 2,
+            "member_limit": null,
+            "direct_chat_limit": null,
+            "active": 1,
+            "expired": 0,
+            "created_at": 1765454689,
+            "view_type": null,
+            "push_alert": null,
+            "icon_url": "",
+            "v": {
+              "pc": null,
+              "meta": null,
+              "om": null,
+              "oc": {
+                "t": 0,
+                "co": null
+              },
+              "op": null,
+              "privilege": 9223372036854644735,
+              "foldChats": true
+            },
+            "searchable": 0,
+            "description": null
+          }
+        ]
+      },
+      {
+        "name": "open_profile",
+        "structure": {
+          "name": "open_profile",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "link_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "user_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "profile_type",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "link_member_type",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "nickname",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "profile_image_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "f_profile_image_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "o_profile_image_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "token",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "profile_link_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 10,
+              "name": "privilege",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 11,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 1,
+        "samples": [
+          {
+            "link_id": 440106185,
+            "user_id": 429744344,
+            "profile_type": 1,
+            "link_member_type": 4,
+            "nickname": "좋은습관메디",
+            "profile_image_url": null,
+            "f_profile_image_url": null,
+            "o_profile_image_url": null,
+            "token": 1766202531,
+            "profile_link_id": 0,
+            "privilege": -1,
+            "v": {}
+          }
+        ]
+      },
+      {
+        "name": "openchat_bot_command",
+        "structure": {
+          "name": "openchat_bot_command",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "bot_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "chat_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "link_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "name",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "description",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "revision",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "updated_at",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "plusfriend_add_info",
+        "structure": {
+          "name": "plusfriend_add_info",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "uuid",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "profile_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "click_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "ad_service_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "time_stamp",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "track_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "quick_view",
+        "structure": {
+          "name": "quick_view",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "chat_room_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "deleted_at",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "read_at",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "is_all_deleted",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "recent_sent_file",
+        "structure": {
+          "name": "recent_sent_file",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "messageId",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "chat_log__id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "chat_log_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "chat_log_type",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "chat_log_chat_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "chat_log_user_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "chat_log_message",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "chat_log_attachment",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "chat_log_created_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "chat_log_deleted_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 10,
+              "name": "chat_log_client_message_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 11,
+              "name": "chat_log_prev_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 12,
+              "name": "chat_log_referer",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 13,
+              "name": "chat_log_supplement",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 14,
+              "name": "chat_log_v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "recently_emoticons",
+        "structure": {
+          "name": "recently_emoticons",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "emoticon_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "last_used_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "count_used",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "v",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "item_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "item_category",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "recommended_friends",
+        "structure": {
+          "name": "recommended_friends",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "user_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "nick_name",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "profile_image_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "full_profile_image_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "original_profile_image_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "type",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "phone_number",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "status_message",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "uuid",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 10,
+              "name": "account_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 11,
+              "name": "user_type",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 12,
+              "name": "ext",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 13,
+              "name": "screen_token",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 14,
+              "name": "suspended",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 15,
+              "name": "direct_chat_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 16,
+              "name": "access_permit",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 17,
+              "name": "verified_creator",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 18,
+              "name": "hidden",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 19,
+              "name": "suspected_impostor",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 20,
+              "name": "enc",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 100,
+        "samples": [
+          {
+            "_id": 1901,
+            "user_id": 265240496,
+            "nick_name": "2WIymR6A4eH7kolfDsPNGQ==",
+            "profile_image_url": "VcZL9Re0nEwNzKUaSDr24O/F0ePBjUX6ZBc4W/6+IuNdZ+VhDOAASqfBRKl5nu7aQy/YA+NoIcIKEsNMuk8MUUPhrrNK6CiFwEe2mTo+1vcSsUOYmwXK0jMUfSRLydJ+10yRr8SGhK+QQjxrQTn4OyFwX3JC3LsE0ZTrJsi026eZo/qfT63S1t5b/6V/kl4V",
+            "full_profile_image_url": "VcZL9Re0nEwNzKUaSDr24O/F0ePBjUX6ZBc4W/6+IuNdZ+VhDOAASqfBRKl5nu7aQy/YA+NoIcIKEsNMuk8MUUPhrrNK6CiFwEe2mTo+1vcSsUOYmwXK0jMUfSRLydJ+10yRr8SGhK+QQjxrQTn4OyFwX3JC3LsE0ZTrJsi026c62IUi6sUUH0KCCtoSdf/B",
+            "original_profile_image_url": "VcZL9Re0nEwNzKUaSDr24O/F0ePBjUX6ZBc4W/6+IuNdZ+VhDOAASqfBRKl5nu7aQy/YA+NoIcIKEsNMuk8MUUPhrrNK6CiFwEe2mTo+1vcSsUOYmwXK0jMUfSRLydJ+10yRr8SGhK+QQjxrQTn4O51SCxOjSICD8Ao5GxiJpzg=",
+            "type": -2,
+            "phone_number": "",
+            "status_message": null,
+            "uuid": null,
+            "account_id": 81101881,
+            "user_type": 0,
+            "ext": null,
+            "screen_token": 0,
+            "suspended": 0,
+            "direct_chat_id": 0,
+            "access_permit": "2a2RdfThbNUZhBUsWOdpKmRD",
+            "verified_creator": 0,
+            "hidden": 0,
+            "suspected_impostor": 0,
+            "enc": 31
+          },
+          {
+            "_id": 1902,
+            "user_id": 422780761,
+            "nick_name": "tepD0H417lCtDX4+eKWQUN0l6W+5RNP8gc2deRj42jEDRwhWnoisV4qcXKmzJ6FU",
+            "profile_image_url": "CVlZYm8Bi4MvxnwVJajU/pi3fZQljWAttYnV9zxqjr3k7B4WfACzQWdtEhxh2LVAz+dJ1w5qt1rF1julFgYb37/fA5Xn6eGYuP4vBak7yf+dkvUZUe33vfvx78O7mc2o",
+            "full_profile_image_url": "CVlZYm8Bi4MvxnwVJajU/pi3fZQljWAttYnV9zxqjr3k7B4WfACzQWdtEhxh2LVAz+dJ1w5qt1rF1julFgYb3+vt7x0ydGtaRWgRV5y/zILe9VPcvmdb+fKVt1GnBY8y",
+            "original_profile_image_url": "CVlZYm8Bi4MvxnwVJajU/kjZqwNtOyFvSWvKbc1nY7ZeiQD9FP2mD+jWDdt+yQKPuEgjdzRaIB+TGwYVwCkJrQSb/HLjGOPiIuEI91+MbyU=",
+            "type": -2,
+            "phone_number": "",
+            "status_message": "xhYGbJZ9c3FyxqLDhbaBaPOdGDnFhC1v5w2jtOxwrK5teTpOvTZCYLXWteJ7BFoY",
+            "uuid": null,
+            "account_id": 283930253,
+            "user_type": 0,
+            "ext": null,
+            "screen_token": 0,
+            "suspended": 0,
+            "direct_chat_id": 0,
+            "access_permit": "2a2RdeIdTDwZhBUsWOdpKmRD",
+            "verified_creator": 0,
+            "hidden": 0,
+            "suspected_impostor": 0,
+            "enc": 31
+          },
+          {
+            "_id": 1903,
+            "user_id": 266100428,
+            "nick_name": "7a2nG9TZXW3O/fsFE5oW9w==",
+            "profile_image_url": "CVlZYm8Bi4MvxnwVJajU/pi3fZQljWAttYnV9zxqjr3rusht3W0Mg6mXQLwQclB945LmTHf8kgVwGvShjqDw/6EORCrs9Tv7lZxSy1x9GZ5ENdhw90MaqURjCcMY2guh",
+            "full_profile_image_url": "CVlZYm8Bi4MvxnwVJajU/pi3fZQljWAttYnV9zxqjr3rusht3W0Mg6mXQLwQclB945LmTHf8kgVwGvShjqDw/y6XLoDDQPGIwq12Zkk2XZ8JAtadlsR/mNesWWZdcwEF",
+            "original_profile_image_url": "CVlZYm8Bi4MvxnwVJajU/kQGgNqdDspluK8njE/UnoPxP19iPI47hkMai3yggKGnq2y0bCUun62tqa8y+nuI5WoJ2kSiqXWGE+Z4xnXxYnM=",
+            "type": -2,
+            "phone_number": "",
+            "status_message": null,
+            "uuid": null,
+            "account_id": 36896725,
+            "user_type": 0,
+            "ext": null,
+            "screen_token": 0,
+            "suspended": 0,
+            "direct_chat_id": 0,
+            "access_permit": "2a2RdfTyDakZhBUsWOdpKmRD",
+            "verified_creator": 0,
+            "hidden": 0,
+            "suspected_impostor": 0,
+            "enc": 31
+          }
+        ]
+      },
+      {
+        "name": "room_master_table",
+        "structure": {
+          "name": "room_master_table",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "identity_hash",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 1,
+        "samples": [
+          {
+            "id": 42,
+            "identity_hash": "88b5a673a8d96db327116c4e05d510df"
+          }
+        ]
+      },
+      {
+        "name": "s2_events",
+        "structure": {
+          "name": "s2_events",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "date",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "page_id",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "action_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "metadata",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "time_stamp",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "sqlite_sequence",
+        "structure": {
+          "name": "sqlite_sequence",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "name",
+              "type": "",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 1,
+              "name": "seq",
+              "type": "",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 4,
+        "samples": [
+          {
+            "name": "item_resource",
+            "seq": 494
+          },
+          {
+            "name": "friends",
+            "seq": 23
+          },
+          {
+            "name": "open_chat_member",
+            "seq": 641
+          }
+        ]
+      },
+      {
+        "name": "tch_chat_log_meta",
+        "structure": {
+          "name": "tch_chat_log_meta",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "chat_log_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": "0",
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "type",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": "''",
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "service_id",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": "''",
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "message_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": "0",
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "need_refresh",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": "1",
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "value",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "tch_chat_log_side",
+        "structure": {
+          "name": "tch_chat_log_side",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "chat_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "chat_log_id",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 2,
+              "name": "type",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 3,
+              "name": "is_adult",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": "0",
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "seq",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": "0",
+              "pk": true
+            },
+            {
+              "cid": 5,
+              "name": "contents",
+              "type": "TEXT",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "major_version",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": "0",
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "minor_version",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": "0",
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "patch_version",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": "0",
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": true,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 0,
+        "samples": []
+      },
+      {
+        "name": "url_log",
+        "structure": {
+          "name": "url_log",
+          "columns": [
+            {
+              "cid": 0,
+              "name": "chat_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": true
+            },
+            {
+              "cid": 1,
+              "name": "chat_room_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 2,
+              "name": "type",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 3,
+              "name": "url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 4,
+              "name": "title",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 5,
+              "name": "description",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 6,
+              "name": "image_url",
+              "type": "TEXT",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 7,
+              "name": "created_at",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 8,
+              "name": "suspected",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 9,
+              "name": "user_id",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            },
+            {
+              "cid": 10,
+              "name": "scrap_status",
+              "type": "INTEGER",
+              "notnull": false,
+              "default_value": null,
+              "pk": false
+            }
+          ]
+        },
+        "row_count": 104,
+        "samples": [
+          {
+            "chat_id": 3731923322755792897,
+            "chat_room_id": 18469584418690487,
+            "type": 0,
+            "url": "korea.naverkoreaservice.community.cafe",
+            "title": "",
+            "description": "",
+            "image_url": "",
+            "created_at": 1765817127,
+            "suspected": 0,
+            "user_id": 429744344,
+            "scrap_status": 0
+          },
+          {
+            "chat_id": 3731924480173981697,
+            "chat_room_id": 18469584418690487,
+            "type": 0,
+            "url": "abc.ghmedi.p-e.kr/go/001apFt",
+            "title": "",
+            "description": "",
+            "image_url": "",
+            "created_at": 1765817265,
+            "suspected": 0,
+            "user_id": 429744344,
+            "scrap_status": 0
+          },
+          {
+            "chat_id": 3731927565118128130,
+            "chat_room_id": 18469584418690487,
+            "type": 0,
+            "url": "https://buly.kr/EduObXe",
+            "title": "",
+            "description": "",
+            "image_url": "",
+            "created_at": 1765817633,
+            "suspected": 0,
+            "user_id": 429744344,
+            "scrap_status": 0
+          }
+        ]
+      }
+    ]
+  },
+  "reaction_analysis": {
+    "v_field_analysis": {
+      "samples": []
+    },
+    "supplement_analysis": {},
+    "reaction_messages": [],
+    "reaction_types": {},
+    "reaction_stats": {
+      "total_messages_with_reactions": 0,
+      "total_reactions": 0,
+      "reaction_distribution": {},
+      "total_messages_with_v": 1752
+    }
+  }
+}

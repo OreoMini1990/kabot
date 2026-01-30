@@ -41,6 +41,43 @@ function normalizeRoomNameForCache(roomName) {
 }
 
 /**
+ * 발신자 ID 정규화 (캐시 키 생성용)
+ * "이름/ID" 형식에서 ID만 추출, 또는 숫자 ID 그대로 사용
+ * @param {string|null|undefined} senderId - 발신자 ID
+ * @returns {string} 정규화된 발신자 ID
+ */
+function normalizeSenderIdForCache(senderId) {
+    if (!senderId) {
+        return '';
+    }
+    
+    const str = String(senderId).trim();
+    
+    // 1. 숫자만 있으면 그대로 사용
+    if (/^\d+$/.test(str)) {
+        return str;
+    }
+    
+    // 2. "이름/ID" 형식에서 모든 부분에서 숫자 ID 찾기 (마지막부터)
+    if (str.includes('/')) {
+        const parts = str.split('/');
+        // 모든 부분에서 숫자 ID 찾기 (마지막부터 역순)
+        for (let i = parts.length - 1; i >= 0; i--) {
+            const part = parts[i].trim();
+            if (/^\d+$/.test(part)) {
+                return part;  // 숫자 ID 반환
+            }
+        }
+        // 숫자를 찾지 못한 경우 원본 그대로 (하위 호환성)
+        // 예: "AN" 같은 경우도 있을 수 있음
+        return str;
+    }
+    
+    // 3. 그 외는 원본 그대로
+    return str;
+}
+
+/**
  * 캐시 키 생성 (roomName + senderId)
  * @param {string|null|undefined} roomName - 채팅방 이름
  * @param {string|null|undefined} senderId - 발신자 ID
@@ -48,12 +85,13 @@ function normalizeRoomNameForCache(roomName) {
  */
 function createCacheKey(roomName, senderId) {
     const normalizedRoom = normalizeRoomNameForCache(roomName);
-    const normalizedSender = String(senderId || '').trim();
+    const normalizedSender = normalizeSenderIdForCache(senderId);
     return `${normalizedRoom}|${normalizedSender}`;
 }
 
 module.exports = {
     normalizeRoomNameForCache,
+    normalizeSenderIdForCache,
     createCacheKey
 };
 

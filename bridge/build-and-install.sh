@@ -106,3 +106,7 @@ echo "테스트 명령어:"
 echo 'adb shell am broadcast -a com.goodhabit.kakaobridge.SEND -n com.goodhabit.kakaobridge/.BridgeCommandReceiver --es token "LOCAL_DEV_TOKEN" --es roomKey "의운모" --es text "테스트 메시지"'
 echo ""
 
+
+
+
+

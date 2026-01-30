@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
   id BIGSERIAL PRIMARY KEY,
   room_id BIGINT REFERENCES public.rooms(id) ON DELETE SET NULL,
   room_name VARCHAR(255) NOT NULL,  -- 하위 호환성을 위해 유지
+  chat_id BIGINT,  -- 카카오톡 chat_id (매핑 개선용)
   user_id BIGINT REFERENCES public.users(id) ON DELETE SET NULL,
   sender_name VARCHAR(255) NOT NULL,  -- 하위 호환성을 위해 유지
   sender_id VARCHAR(255),  -- 하위 호환성을 위해 유지
@@ -132,6 +133,58 @@ BEGIN
       UNIQUE (message_id, reactor_name, reaction_type);
   END IF;
 END $$;
+
+-- 3-1) chat_reaction_counts (반응 카운트 스냅샷 - 경량 버전)
+CREATE TABLE IF NOT EXISTS public.chat_reaction_counts (
+  id BIGSERIAL PRIMARY KEY,
+  message_id BIGINT NOT NULL REFERENCES public.chat_messages(id) ON DELETE CASCADE,
+  kakao_log_id BIGINT NOT NULL,
+  chat_id BIGINT NOT NULL,
+  room_name TEXT,
+  reaction_count INTEGER NOT NULL,
+  message_created_at TIMESTAMPTZ,
+  last_observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  
+  CONSTRAINT uq_chat_reaction_counts_message UNIQUE (message_id)
+);
+
+-- 인덱스 생성
+CREATE INDEX IF NOT EXISTS idx_chat_reaction_counts_chat_id_observed ON public.chat_reaction_counts(chat_id, last_observed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_reaction_counts_count ON public.chat_reaction_counts(reaction_count DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_reaction_counts_kakao_log_id ON public.chat_reaction_counts(kakao_log_id);
+
+-- 3-2) chat_reaction_deltas (반응 개수 변경 이력 - 선택)
+CREATE TABLE IF NOT EXISTS public.chat_reaction_deltas (
+  id BIGSERIAL PRIMARY KEY,
+  message_id BIGINT NOT NULL REFERENCES public.chat_messages(id) ON DELETE CASCADE,
+  delta INTEGER NOT NULL,
+  old_count INTEGER NOT NULL,
+  new_count INTEGER NOT NULL,
+  observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 인덱스 생성
+CREATE INDEX IF NOT EXISTS idx_chat_reaction_deltas_observed_at ON public.chat_reaction_deltas(observed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_reaction_deltas_message_observed ON public.chat_reaction_deltas(message_id, observed_at DESC);
+
+-- 3-3) reaction_count_pending (매핑 실패 대비 - 누락 방지)
+CREATE TABLE IF NOT EXISTS public.reaction_count_pending (
+  id BIGSERIAL PRIMARY KEY,
+  chat_id BIGINT NOT NULL,
+  kakao_log_id BIGINT NOT NULL,
+  new_count INTEGER NOT NULL,
+  room_name TEXT,
+  observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 인덱스 생성
+CREATE INDEX IF NOT EXISTS idx_reaction_count_pending_chat_log_id ON public.reaction_count_pending(chat_id, kakao_log_id);
+CREATE INDEX IF NOT EXISTS idx_reaction_count_pending_first_seen ON public.reaction_count_pending(first_seen_at);
 
 -- 4) user_statistics
 CREATE TABLE IF NOT EXISTS public.user_statistics (
@@ -401,3 +454,52 @@ DROP TRIGGER IF EXISTS trg_user_activity_set_updated_at ON public.user_activity;
 CREATE TRIGGER trg_user_activity_set_updated_at
 BEFORE UPDATE ON public.user_activity
 FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ============================================
+-- 네이버 OAuth 토큰 저장 (사용자별)
+-- ============================================
+
+-- 8) naver_oauth_tokens
+CREATE TABLE IF NOT EXISTS public.naver_oauth_tokens (
+  user_id VARCHAR(255) PRIMARY KEY,  -- 카톡 사용자 식별자 (sender_id 등)
+  access_token TEXT NOT NULL,  -- 평문 저장 (암호화 미적용)
+  refresh_token TEXT NOT NULL,  -- 평문 저장 (암호화 미적용)
+  expires_at TIMESTAMPTZ NOT NULL,  -- access_token 만료 시각
+  scope TEXT,  -- OAuth scope (nullable)
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 인덱스 생성
+CREATE INDEX IF NOT EXISTS idx_naver_oauth_tokens_expires_at ON public.naver_oauth_tokens(expires_at);
+
+-- updated_at 트리거
+DROP TRIGGER IF EXISTS trg_naver_oauth_tokens_set_updated_at ON public.naver_oauth_tokens;
+CREATE TRIGGER trg_naver_oauth_tokens_set_updated_at
+BEFORE UPDATE ON public.naver_oauth_tokens
+FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- ============================================
+-- 카페 글쓰기 Draft (연동 대기 중 저장)
+-- ============================================
+
+-- 9) cafe_post_drafts
+CREATE TABLE IF NOT EXISTS public.cafe_post_drafts (
+  id BIGSERIAL PRIMARY KEY,
+  user_id VARCHAR(255) NOT NULL,
+  room_name VARCHAR(255),
+  title TEXT NOT NULL,
+  content TEXT NOT NULL,
+  image_refs TEXT[],  -- 이미지 URL 배열
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL,  -- TTL (기본 2시간)
+  
+  CONSTRAINT uq_cafe_post_drafts_user UNIQUE (user_id)
+);
+
+-- 인덱스 생성
+CREATE INDEX IF NOT EXISTS idx_cafe_post_drafts_user_id ON public.cafe_post_drafts(user_id);
+CREATE INDEX IF NOT EXISTS idx_cafe_post_drafts_expires_at ON public.cafe_post_drafts(expires_at);
+
+-- 만료된 draft 자동 정리 (선택적, 크론 작업으로 대체 가능)
+-- DELETE FROM cafe_post_drafts WHERE expires_at < NOW();

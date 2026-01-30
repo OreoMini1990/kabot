@@ -73,5 +73,9 @@ NAS에서 WebSocket으로 메시지 전송:
 ### WebSocket 연결이 안 되는 경우
 1. 네트워크 연결 확인
 2. NAS 서버 상태 확인
-3. WebSocket URL 확인 (기본값: `ws://211.218.42.222:5002/ws`)
+3. WebSocket URL 확인 (기본값: `ws://192.168.0.15:5002/ws`)
+
+
+
+
 

@@ -97,3 +97,7 @@ Git을 사용하여 버전 관리:
 - websocket-client: >=1.6.0
 - pycryptodome: >=3.19.0
 
+
+
+
+

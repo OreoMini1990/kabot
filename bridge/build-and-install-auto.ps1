@@ -49,6 +49,10 @@ if ($buildType -eq "Release") {
 # 3. Build APK
 Write-Host "[2/4] Building APK..." -ForegroundColor Yellow
 try {
+    # Clean build for fresh start
+    Write-Host "[INFO] Cleaning previous build..." -ForegroundColor Gray
+    & $gradleCmd clean 2>&1 | Out-Null
+    
     if ($buildType -eq "Debug") {
         & $gradleCmd assembleDebug
     } else {
@@ -56,12 +60,13 @@ try {
     }
     
     if ($LASTEXITCODE -ne 0) {
-        throw "Build failed"
+        throw "Build failed with exit code: $LASTEXITCODE"
     }
     
     Write-Host "[OK] Build completed" -ForegroundColor Green
 } catch {
     Write-Host "[FAIL] Build failed: $_" -ForegroundColor Red
+    Write-Host "[INFO] Check the error messages above for details" -ForegroundColor Yellow
     exit 1
 }
 

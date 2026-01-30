@@ -7,8 +7,8 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
 # 서버 URL 설정
-$SERVER_URL = "http://211.218.42.222:5002"
-$WS_URL = "ws://211.218.42.222:5002/ws"
+$SERVER_URL = "http://192.168.0.15:5002"
+$WS_URL = "ws://192.168.0.15:5002/ws"
 
 Write-Host "[1단계] WebSocket 연결 테스트" -ForegroundColor Yellow
 Write-Host "서버 URL: $WS_URL" -ForegroundColor Gray

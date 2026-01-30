@@ -66,6 +66,10 @@ class MainActivity : AppCompatActivity() {
             permissionHelper = PermissionHelper(this)
             android.util.Log.d("MainActivity", "PermissionHelper initialized")
 
+            // ⚠️ 중요: Bridge 설정 자동 초기화 (API Key 및 서버 URL)
+            initializeBridgeConfig()
+            android.util.Log.d("MainActivity", "Bridge config initialized")
+
             // 버튼 클릭 리스너
             permissionButton.setOnClickListener {
                 requestNotificationPermission()
@@ -278,6 +282,37 @@ class MainActivity : AppCompatActivity() {
         prefs.edit().putBoolean("service_running", false).apply()
         Toast.makeText(this, "서비스가 중지되었습니다.", Toast.LENGTH_SHORT).show()
         updateServiceState()
+    }
+    
+    /**
+     * Bridge 설정 자동 초기화
+     * API Key와 서버 URL을 기본값으로 설정
+     */
+    private fun initializeBridgeConfig() {
+        val prefs = getSharedPreferences("bridge_config", Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+        
+        // 서버 URL 설정 (기본값)
+        val serverUrl = prefs.getString("server_url", null)
+        if (serverUrl.isNullOrBlank()) {
+            editor.putString("server_url", "http://192.168.0.15:5002")
+            android.util.Log.i("MainActivity", "[Bridge 설정] 서버 URL 설정: http://192.168.0.15:5002")
+        }
+        
+        // Bridge API Key 설정 (기본값)
+        val apiKey = prefs.getString("bridge_api_key", null)
+        if (apiKey.isNullOrBlank()) {
+            // 기본 API Key 설정 (나중에 서버 .env와 동일하게 변경 필요)
+            val defaultApiKey = "kakkaobot-bridge-2024-12-20-secret-key-default"
+            editor.putString("bridge_api_key", defaultApiKey)
+            android.util.Log.i("MainActivity", "[Bridge 설정] API Key 설정: $defaultApiKey")
+        }
+        
+        editor.apply()
+        
+        android.util.Log.i("MainActivity", "[Bridge 설정] 초기화 완료")
+        android.util.Log.i("MainActivity", "  - server_url: ${prefs.getString("server_url", "없음")}")
+        android.util.Log.i("MainActivity", "  - bridge_api_key: ${if (prefs.getString("bridge_api_key", null) != null) "설정됨" else "없음"}")
     }
 }
 

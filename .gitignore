@@ -58,3 +58,6 @@ my_user_id.txt
 *.bak
 *.swp
 
+# Naver encoding cache
+.naver_encoding_cache.json
+

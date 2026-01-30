@@ -74,7 +74,7 @@ NAVER_CAFE_CAFEURL=mycafe  # 선택사항
 # 짧은 링크용 공개 URL
 PUBLIC_BASE_URL=https://your-domain.com
 # 또는
-PUBLIC_BASE_URL=http://211.218.42.222:5002
+PUBLIC_BASE_URL=http://192.168.0.15:5002
 ```
 
 ### 6. 패키지 설치 확인
@@ -186,12 +186,21 @@ ORDER BY created_at DESC;
 ### 4. 짧은 링크가 작동하지 않습니다
 
 `PUBLIC_BASE_URL` 환경변수가 올바르게 설정되어 있는지 확인하세요.
-외부에서 접근 가능한 URL이어야 합니다 (예: `https://your-domain.com` 또는 `http://211.218.42.222:5002`).
+외부에서 접근 가능한 URL이어야 합니다 (예: `https://your-domain.com` 또는 `http://192.168.0.15:5002`).
 
 ## 참고 자료
 
 - [네이버 카페 API 문서](https://developers.naver.com/docs/login/cafe-api/cafe-api.md)
 - [네이버 OAuth 2.0 문서](https://developers.naver.com/docs/login/overview/)
+
+
+
+
+
+
+
+
+
 
 
 

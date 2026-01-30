@@ -309,5 +309,125 @@ router.delete('/warnings', async (req, res) => {
     }
 });
 
+// ============================================
+// 로그 조회 (서버/클라이언트 통합)
+// ============================================
+
+const fs = require('fs');
+const path = require('path');
+
+// 서버 로그 조회
+router.get('/logs/server', (req, res) => {
+    try {
+        const logFilePath = path.join(__dirname, '../logs/server.log');
+        console.log('[API] 서버 로그 파일 경로:', logFilePath);
+        console.log('[API] 파일 존재 여부:', fs.existsSync(logFilePath));
+        
+        if (!fs.existsSync(logFilePath)) {
+            console.log('[API] 서버 로그 파일이 없습니다. 빈 배열 반환');
+            return res.json({ success: true, data: [], message: '서버 로그 파일이 없습니다.' });
+        }
+        
+        const logContent = fs.readFileSync(logFilePath, 'utf8');
+        const lines = logContent.split('\n').filter(line => line.trim() !== '');
+        console.log('[API] 서버 로그 라인 수:', lines.length);
+        res.json({ success: true, data: lines, count: lines.length });
+    } catch (error) {
+        console.error('[API] 서버 로그 조회 실패:', error);
+        console.error('[API] 오류 스택:', error.stack);
+        res.status(500).json({ success: false, error: '조회 실패', message: error.message });
+    }
+});
+
+// 클라이언트 로그 조회
+router.get('/logs/client', (req, res) => {
+    try {
+        const logFilePath = path.join(__dirname, '../logs/client.log');
+        console.log('[API] 클라이언트 로그 파일 경로:', logFilePath);
+        console.log('[API] 파일 존재 여부:', fs.existsSync(logFilePath));
+        
+        if (!fs.existsSync(logFilePath)) {
+            console.log('[API] 클라이언트 로그 파일이 없습니다. 빈 배열 반환');
+            return res.json({ success: true, data: [], message: '클라이언트 로그 파일이 없습니다.' });
+        }
+        
+        const logContent = fs.readFileSync(logFilePath, 'utf8');
+        const lines = logContent.split('\n').filter(line => line.trim() !== '');
+        console.log('[API] 클라이언트 로그 라인 수:', lines.length);
+        res.json({ success: true, data: lines, count: lines.length });
+    } catch (error) {
+        console.error('[API] 클라이언트 로그 조회 실패:', error);
+        console.error('[API] 오류 스택:', error.stack);
+        res.status(500).json({ success: false, error: '조회 실패', message: error.message });
+    }
+});
+
+// 통합 로그 조회 (서버 + 클라이언트)
+router.get('/logs/combined', (req, res) => {
+    try {
+        const serverLogPath = path.join(__dirname, '../logs/server.log');
+        const clientLogPath = path.join(__dirname, '../logs/client.log');
+        
+        console.log('[API] 통합 로그 조회 시작');
+        console.log('[API] 서버 로그 경로:', serverLogPath, '존재:', fs.existsSync(serverLogPath));
+        console.log('[API] 클라이언트 로그 경로:', clientLogPath, '존재:', fs.existsSync(clientLogPath));
+        
+        const combinedLogs = [];
+        
+        // 서버 로그 읽기
+        if (fs.existsSync(serverLogPath)) {
+            const serverContent = fs.readFileSync(serverLogPath, 'utf8');
+            const serverLines = serverContent.split('\n').filter(line => line.trim() !== '');
+            console.log('[API] 서버 로그 라인 수:', serverLines.length);
+            serverLines.forEach(line => {
+                combinedLogs.push({ source: 'server', line: line });
+            });
+        }
+        
+        // 클라이언트 로그 읽기
+        if (fs.existsSync(clientLogPath)) {
+            const clientContent = fs.readFileSync(clientLogPath, 'utf8');
+            const clientLines = clientContent.split('\n').filter(line => line.trim() !== '');
+            console.log('[API] 클라이언트 로그 라인 수:', clientLines.length);
+            clientLines.forEach(line => {
+                combinedLogs.push({ source: 'client', line: line });
+            });
+        }
+        
+        // 타임스탬프 기준으로 정렬 (최신순)
+        combinedLogs.sort((a, b) => {
+            const aTime = extractTimestamp(a.line);
+            const bTime = extractTimestamp(b.line);
+            return bTime.localeCompare(aTime);
+        });
+        
+        console.log('[API] 통합 로그 총 라인 수:', combinedLogs.length);
+        res.json({ success: true, data: combinedLogs, count: combinedLogs.length });
+    } catch (error) {
+        console.error('[API] 통합 로그 조회 실패:', error);
+        console.error('[API] 오류 스택:', error.stack);
+        res.status(500).json({ success: false, error: '조회 실패', message: error.message });
+    }
+});
+
+// 타임스탬프 추출 헬퍼 함수
+function extractTimestamp(logLine) {
+    // [2025-12-20T11:25:03.201Z] 형식 추출
+    const match = logLine.match(/\[(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z)\]/);
+    if (match) {
+        return match[1];
+    }
+    // [2025-12-20 11:25:03] 형식 추출
+    const match2 = logLine.match(/\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/);
+    if (match2) {
+        return match2[1].replace(' ', 'T') + '.000Z';
+    }
+    return '1970-01-01T00:00:00.000Z'; // 기본값
+}
+
 module.exports = router;
+
+
+
+
 

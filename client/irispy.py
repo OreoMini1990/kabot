@@ -144,7 +144,7 @@ def is_admin(sender_id: str) -> bool:
     return sender_id in ADMIN_USERS
 
 # Bot 초기화
-bot = Bot("211.218.42.222:5002")
+bot = Bot("192.168.0.15:5002")
 
 @bot.on_event("chat")
 def on_chat_debug(chat: ChatContext):

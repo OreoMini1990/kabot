@@ -52,7 +52,7 @@ adb install -r app-release.apk
 - 배터리 최적화 제외: "설정 열기" 버튼 클릭 → KakaoBridge "제한 없음" 선택
 
 ### 2. WebSocket URL 설정 (선택사항)
-앱 내 설정에서 NAS WebSocket URL 입력 (기본값: `ws://211.218.42.222:5002/ws`)
+앱 내 설정에서 NAS WebSocket URL 입력 (기본값: `ws://192.168.0.15:5002/ws`)
 
 ## 테스트 방법
 
@@ -105,4 +105,8 @@ NAS에서 WebSocket으로 메시지 전송:
 
 - [README.md](README.md) - 프로젝트 개요
 - [docs/TECHNICAL_LIMITATIONS.md](../docs/TECHNICAL_LIMITATIONS.md) - 기술적 한계 분석
+
+
+
+
 

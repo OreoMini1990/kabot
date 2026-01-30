@@ -96,3 +96,7 @@ INSERT OR IGNORE INTO profanity_words (word, type) VALUES
     ('약사년', 'job_discrimination'),
     ('한의사새끼', 'job_discrimination');
 
+
+
+
+

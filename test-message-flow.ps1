@@ -23,7 +23,7 @@ if ($Server -or $All) {
     Write-Host "[1/3] Server Status" -ForegroundColor Yellow
     
     # 서버가 실행 중인지 확인 (포트 5002)
-    $serverRunning = Test-NetConnection -ComputerName 211.218.42.222 -Port 5002 -InformationLevel Quiet -WarningAction SilentlyContinue
+    $serverRunning = Test-NetConnection -ComputerName 192.168.0.15 -Port 5002 -InformationLevel Quiet -WarningAction SilentlyContinue
     if ($serverRunning) {
         Write-Host "  [OK] Server is running on port 5002" -ForegroundColor Green
     } else {
@@ -106,4 +106,8 @@ if (-not ($Server -or $Client -or $Bridge -or $All)) {
     Write-Host "  .\test-message-flow.ps1 -Bridge    # Test Bridge APK" -ForegroundColor Gray
     Write-Host "  .\test-message-flow.ps1 -All       # Test all" -ForegroundColor Gray
 }
+
+
+
+
 

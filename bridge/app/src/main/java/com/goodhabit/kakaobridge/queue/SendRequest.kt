@@ -35,3 +35,7 @@ data class SendRequest(
     val imageUrl: String? = null        // 이미지 URL (선택사항)
 )
 
+
+
+
+

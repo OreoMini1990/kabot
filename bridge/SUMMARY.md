@@ -117,3 +117,7 @@ bridge/
 3. **카카오톡 알림 설정**: 해당 채팅방 알림이 켜져 있어야 RemoteInput 사용 가능
 4. **WebSocket URL 설정**: NAS WebSocket URL을 앱에 설정 필요 (기본값 제공)
 
+
+
+
+

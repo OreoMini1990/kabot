@@ -97,3 +97,12 @@ ON CONFLICT (word) DO NOTHING;
 
 
 
+
+
+
+
+
+
+
+
+

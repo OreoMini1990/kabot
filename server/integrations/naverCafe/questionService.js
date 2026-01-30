@@ -59,7 +59,23 @@ async function submitQuestion({
         
         console.log(`[네이버 카페] 질문 DB 저장 완료: id=${postId}, shortCode=${shortCode}`);
         
-        // 네이버 카페에 글 작성 시도
+        // 이미지 전달 확인 로깅 (테스트 로직과 동일하게)
+        if (images && Array.isArray(images) && images.length > 0) {
+            console.log(`[네이버 카페] ✅ 이미지 전달: ${images.length}개 이미지`);
+            images.forEach((img, idx) => {
+                if (Buffer.isBuffer(img)) {
+                    console.log(`[네이버 카페] 이미지 ${idx + 1}: Buffer (${img.length} bytes)`);
+                } else if (typeof img === 'string') {
+                    console.log(`[네이버 카페] 이미지 ${idx + 1}: 파일 경로 또는 URL (${img.substring(0, 50)}...)`);
+                } else {
+                    console.log(`[네이버 카페] 이미지 ${idx + 1}: ${typeof img}`);
+                }
+            });
+        } else {
+            console.log(`[네이버 카페] 이미지 없이 진행: images=${images}`);
+        }
+        
+        // 네이버 카페에 글 작성 시도 (테스트 로직과 동일하게)
         const writeResult = await createQuestion({
             title: title,
             content: content,
@@ -67,7 +83,7 @@ async function submitQuestion({
             clubid: clubid,
             menuid: menuid,
             headid: headid,
-            images: images
+            images: images  // Buffer 배열 또는 null (테스트 로직과 동일)
         });
         
         if (writeResult.success) {

@@ -67,3 +67,7 @@ Gradle Wrapper가 제대로 생성되었는지 확인:
 ### Android Studio에서 프로젝트 열기
 - 가장 쉬운 방법은 Android Studio에서 프로젝트를 열면 자동으로 Gradle Wrapper가 생성됩니다.
 
+
+
+
+

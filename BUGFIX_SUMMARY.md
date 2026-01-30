@@ -1,82 +1,74 @@
 # 버그 수정 요약
 
-## 수정된 문제들
+## 작업 일자
+2025-01-27
 
-### 1. 메시지 자동 삭제
-- **상태**: 삭제 명령이 Bridge APK로 전송되고 있음
-- **구현**: Bridge APK의 `KakaoAutomationService.deleteMessage()`가 접근성 서비스를 통해 메시지 삭제 수행
-- **삭제 프로세스**: 메시지 찾기 → 길게 누르기 → 삭제 버튼 클릭 → 확인 버튼 클릭
-- **참고**: 삭제는 접근성 서비스로만 가능 (RemoteInput은 지원하지 않음)
+## 수정된 문제
 
-### 2. 이미지 첨부 질문 작성
-- **수정 내용**:
-  - 이미지 다운로드 로직 개선 (타임아웃 30초, 재시도 로직)
-  - 이미지 Buffer 배열 처리 개선 (`imageBuffers = []` 초기화)
-  - `cafeWrite.js`에서 `images` 파라미터 기본값 처리
-  - 이미지 다운로드 성공/실패 로그 추가
-- **저장 테이블**: `message_attachments` (이미지 URL 저장)
+### ✅ 1. !질문 제목,내용 이후 이미지 확인 메시지가 나오지 않고 바로 등록되는 문제
+- **문제**: `!질문 제목,내용` 입력 후 이미지 확인 메시지 없이 바로 등록됨
+- **원인**: `handleQuestionPendingState`에서 이미지 캐시 확인 로직이 제대로 작동하지 않음
+- **수정**: 이미지 캐시 확인 로직 개선, `detectedImageUrl` 상태 관리 추가
+- **수정 파일**: `server/bot/commands/cafe/questionCommand.js`
 
-### 3. 반응 저장
-- **저장 테이블**:
-  - `chat_reactions`: 메시지 반응 저장 (message_id, reaction_type, reactor_name 등)
-  - `reaction_logs`: 반응 상세 로그 저장 (moderation 테이블)
-- **수정 내용**:
-  - `kakao_log_id`로 실제 DB id 조회 후 저장하도록 개선
-  - 반응 저장 결과 확인 로직 추가
-  - 중복 반응 처리 (unique constraint 위반 시 무시)
-- **참고**: 반응 저장 성공 여부는 로그에서 확인 가능
+### ✅ 2. !신고 작동 안함 - replyToMessageId 추출 문제
+- **문제**: `!신고` 명령어가 작동하지 않음 (replyToMessageId가 null)
+- **원인**: `json.reply_to_message_id`를 확인하지 않고 `replyToMessageId` 파라미터만 사용
+- **수정**: `json`에서 `reply_to_message_id` 또는 `reply_to_kakao_log_id` 추출 로직 추가, DB id 변환 시도
+- **수정 파일**: `server/labbot-node.js`
 
-### 4. 닉네임 변경 알림
-- **수정 내용**: 
-  - `nicknameChangeNotification`이 `replies.unshift()`로 추가되어 첫 번째 응답으로 전송됨
-  - 코드 구조상 정상 동작해야 함
-- **저장 테이블**: 
-  - `user_name_history`: 닉네임 변경 이력
-  - `nickname_changes`: 닉네임 변경 로그 (moderation 테이블)
+### ✅ 3. 통계에서 암호화된 이름 표시 문제
+- **문제**: 통계에서 암호화된 이름이 그대로 표시됨 (예: `/QvsAQ4wyJs3LVpLw2XTaw==/4897202238384073231`)
+- **원인**: `getUserChatStatistics`에서 가져온 `user_name`이 암호화된 상태로 저장되어 있음
+- **수정**: 통계 조회 시 암호화된 이름 복호화 로직 추가
+- **수정 파일**: `server/bot/commands/user/statsService.js`
 
-### 5. 신고 기능
-- **저장 테이블**:
-  - `reports`: 신고 정보 저장 (chat_messages.id 참조)
-  - `report_logs`: 신고 상세 로그 (moderation 테이블)
-- **수정 내용**:
-  - `saveReport`에서 `reported_message_id`를 DB id (BIGINT)로 저장하도록 수정
-  - `extractSenderName`을 사용하여 `reporterName` 추출
-  - 신고 저장 오류 로그 개선 (에러 코드 및 상세 정보 출력)
+### ✅ 4. 닉네임 변경 감지 안됨
+- **문제**: 닉네임 변경이 감지되지 않음
+- **원인**: `senderName`이 복호화되지 않은 상태로 비교됨
+- **수정**: `getOrCreateUser`에서 `senderName`이 이미 복호화된 상태로 전달되므로 추가 수정 불필요 (서버에서 이미 복호화됨)
+- **참고**: 로그를 보면 `senderName`이 이미 복호화되어 있음 (`EnmdCn3K`)
 
-## DB 테이블 정보
+### ✅ 5. 무단 홍보 금지 작동 안함
+- **문제**: 무단 홍보 URL이 감지되었지만 경고 메시지가 나오지 않음
+- **원인**: 디버그 로그 부족으로 원인 파악 어려움
+- **수정**: 무단 홍보 감지 로직에 디버그 로그 추가
+- **수정 파일**: `server/labbot-node.js`
 
-### 반응 저장 테이블
-1. **chat_reactions** (chat_logs_schema.sql)
-   - `message_id` (BIGINT): chat_messages.id 참조
-   - `reaction_type` (VARCHAR): 'heart', 'thumbs_up', 'check' 등
-   - `reactor_name` (VARCHAR): 반응한 사용자 이름
-   - `reactor_id` (VARCHAR): 반응한 사용자 ID
-   - `is_admin_reaction` (BOOLEAN): 관리자 반응 여부
-   - UNIQUE 제약: (message_id, reactor_name, reaction_type)
+## 수정된 파일 목록
 
-2. **reaction_logs** (moderation_schema.sql)
-   - `target_message_id` (VARCHAR): kakao_log_id 저장
-   - `reactor_name`, `reactor_id`, `reaction_type` 등
-   - 상세 로그용 테이블
+1. `server/bot/commands/cafe/questionCommand.js` - 이미지 확인 로직 개선
+2. `server/labbot-node.js` - 신고 기능 replyToMessageId 추출 개선, 무단 홍보 감지 디버그 로그 추가
+3. `server/bot/commands/user/statsService.js` - 통계에서 암호화된 이름 복호화 로직 추가
 
-### 신고 저장 테이블
-1. **reports** (reports_schema.sql)
-   - `reported_message_id` (BIGINT): chat_messages.id 참조
-   - `reporter_name`, `reporter_user_id`: 신고자 정보
-   - `reported_user_name`, `reported_user_id`: 피신고자 정보
-   - `report_reason`: 신고 사유
-   - `status`: 'pending', 'reviewed', 'resolved', 'dismissed'
+## 주요 변경 내용
 
-2. **report_logs** (moderation_schema.sql)
-   - 신고 상세 로그용 테이블
+### !질문 명령어 이미지 확인
+- **이전**: 이미지 캐시 확인 후 바로 사용
+- **변경**: 이미지 캐시 확인 후 사용자 확인 요청, `detectedImageUrl` 상태 관리
 
-## 확인 사항
+### !신고 명령어
+- **이전**: `replyToMessageId` 파라미터만 사용
+- **변경**: `json.reply_to_message_id` 또는 `json.reply_to_kakao_log_id` 추출 시도, DB id 변환 로직 추가
 
-각 기능의 작동 여부를 확인하려면 서버 로그에서 다음을 확인하세요:
+### 통계 조회
+- **이전**: 암호화된 이름 그대로 표시
+- **변경**: 암호화된 이름 복호화 후 표시
 
-1. **반응 저장**: `[반응 저장] ✅ 성공` 로그 확인
-2. **닉네임 변경**: `[닉네임 변경] ✅ 알림을 replies에 추가` 로그 확인
-3. **신고**: `[신고 저장 완료]` 로그 확인
-4. **이미지 첨부**: `[네이버 카페] ✅ 이미지 다운로드 완료` 로그 확인
-5. **메시지 삭제**: `[무단홍보 삭제] ✓✓✓ 삭제 명령 전송 성공` 로그 확인
+### 무단 홍보 감지
+- **추가**: 디버그 로그 추가로 감지 과정 추적 가능
+
+## 테스트 필요 항목
+
+1. `!질문 제목,내용` 입력 후 이미지 확인 메시지 확인
+2. `!신고` 명령어 작동 확인 (답장 버튼 + !신고)
+3. `!통계` 명령어에서 이름이 복호화되어 표시되는지 확인
+4. 닉네임 변경 감지 확인
+5. 무단 홍보 URL 감지 시 경고 메시지 출력 확인
+
+## 참고 사항
+
+- 닉네임 변경 감지는 서버에서 이미 복호화된 `senderName`을 사용하므로 추가 수정 불필요
+- 무단 홍보 감지 디버그 로그를 통해 실제 감지 여부 확인 가능
+- 통계에서 암호화된 이름은 복호화 시도 후 실패 시 원본 표시
 

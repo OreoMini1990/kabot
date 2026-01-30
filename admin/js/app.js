@@ -5,11 +5,20 @@
 const API_BASE = '/api/admin';
 let authToken = localStorage.getItem('adminToken') || '';
 
+// 로그 관련 변수
+let logsAutoRefreshInterval = null;
+let currentLogType = 'combined'; // 'server', 'client', 'combined'
+
 // 페이지 로드 시
 document.addEventListener('DOMContentLoaded', () => {
+    // 로그 버튼은 네비게이션 탭 영역에 항상 표시되므로 숨기지 않음
+    
     if (authToken) {
         document.getElementById('adminToken').value = authToken;
-        setToken();
+        // 약간의 지연 후 setToken 호출 (DOM이 완전히 로드된 후)
+        setTimeout(() => {
+            setToken();
+        }, 100);
     }
     
     loadProfanity();
@@ -23,18 +32,37 @@ function setToken() {
     const token = document.getElementById('adminToken').value;
     if (!token) {
         showAuthStatus('토큰을 입력하세요', 'error');
+        // 로그 버튼 숨기기
+        const logsBtn = document.getElementById('logs-btn');
+        if (logsBtn) {
+            logsBtn.classList.add('hidden');
+        }
         return;
     }
     
-    authToken = token;
-    localStorage.setItem('adminToken', token);
-    showAuthStatus('인증 완료', 'success');
-    
-    // 데이터 다시 로드
-    loadProfanity();
-    loadNotices();
-    loadFilterLogs();
-    loadWarnings();
+    // 인증 테스트 (API 호출)
+    fetch(`${API_BASE}/profanity?limit=1`, {
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    }).then(response => {
+        if (response.ok) {
+            authToken = token;
+            localStorage.setItem('adminToken', token);
+            showAuthStatus('인증 완료', 'success');
+            
+            // 데이터 다시 로드
+            loadProfanity();
+            loadNotices();
+            loadFilterLogs();
+            loadWarnings();
+        } else {
+            showAuthStatus('인증 실패', 'error');
+        }
+    }).catch(error => {
+        console.error('[인증 오류]', error);
+        showAuthStatus('인증 오류', 'error');
+    });
 }
 
 function showAuthStatus(message, type) {
@@ -462,7 +490,11 @@ function renderWarningsTable(warnings) {
 // ============================================
 
 function closeModal(modalId) {
-    document.getElementById(modalId).style.display = 'none';
+    if (modalId === 'logs-modal') {
+        closeLogsModal();
+    } else {
+        document.getElementById(modalId).style.display = 'none';
+    }
 }
 
 function escapeHtml(text) {
@@ -577,7 +609,258 @@ window.onclick = function(event) {
     modals.forEach(modal => {
         if (event.target === modal) {
             modal.style.display = 'none';
+            if (modal.id === 'logs-modal') {
+                stopAutoRefresh();
+            }
         }
     });
 }
+
+// ============================================
+// 로그 뷰어 기능
+// ============================================
+
+function showLogsModal() {
+    document.getElementById('logs-modal').style.display = 'block';
+    loadCombinedLogs(); // 기본으로 통합 로그 표시
+}
+
+function closeLogsModal() {
+    document.getElementById('logs-modal').style.display = 'none';
+    stopAutoRefresh();
+}
+
+function toggleAutoRefresh() {
+    const checkbox = document.getElementById('auto-refresh-logs');
+    if (checkbox.checked) {
+        startAutoRefresh();
+    } else {
+        stopAutoRefresh();
+    }
+}
+
+function startAutoRefresh() {
+    stopAutoRefresh(); // 기존 인터벌 제거
+    logsAutoRefreshInterval = setInterval(() => {
+        if (currentLogType === 'server') {
+            loadServerLogs();
+        } else if (currentLogType === 'client') {
+            loadClientLogs();
+        } else {
+            loadCombinedLogs();
+        }
+    }, 5000); // 5초마다
+}
+
+function stopAutoRefresh() {
+    if (logsAutoRefreshInterval) {
+        clearInterval(logsAutoRefreshInterval);
+        logsAutoRefreshInterval = null;
+    }
+}
+
+async function loadServerLogs() {
+    currentLogType = 'server';
+    const contentDiv = document.getElementById('logs-content');
+    contentDiv.innerHTML = '<div class="loading">로딩 중...</div>';
+    
+    try {
+        const response = await fetch(`${API_BASE}/logs/server`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `서버 로그 조회 실패 (${response.status})`);
+        }
+        
+        const data = await response.json();
+        if (data.success) {
+            if (data.data && data.data.length > 0) {
+                renderLogs(data.data, 'server');
+            } else {
+                contentDiv.innerHTML = `<div class="error">${data.message || '로그가 없습니다.'}</div>`;
+            }
+        } else {
+            contentDiv.innerHTML = `<div class="error">${data.message || data.error || '로그 조회 실패'}</div>`;
+        }
+    } catch (error) {
+        console.error('[로그 조회 오류]', error);
+        contentDiv.innerHTML = `<div class="error">오류: ${error.message}</div>`;
+    }
+}
+
+async function loadClientLogs() {
+    currentLogType = 'client';
+    const contentDiv = document.getElementById('logs-content');
+    contentDiv.innerHTML = '<div class="loading">로딩 중...</div>';
+    
+    try {
+        const response = await fetch(`${API_BASE}/logs/client`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `클라이언트 로그 조회 실패 (${response.status})`);
+        }
+        
+        const data = await response.json();
+        if (data.success) {
+            if (data.data && data.data.length > 0) {
+                renderLogs(data.data, 'client');
+            } else {
+                contentDiv.innerHTML = `<div class="error">${data.message || '로그가 없습니다.'}</div>`;
+            }
+        } else {
+            contentDiv.innerHTML = `<div class="error">${data.message || data.error || '로그 조회 실패'}</div>`;
+        }
+    } catch (error) {
+        console.error('[로그 조회 오류]', error);
+        contentDiv.innerHTML = `<div class="error">오류: ${error.message}</div>`;
+    }
+}
+
+async function loadCombinedLogs() {
+    currentLogType = 'combined';
+    const contentDiv = document.getElementById('logs-content');
+    contentDiv.innerHTML = '<div class="loading">로딩 중...</div>';
+    
+    try {
+        const response = await fetch(`${API_BASE}/logs/combined`, {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.message || `통합 로그 조회 실패 (${response.status})`);
+        }
+        
+        const data = await response.json();
+        if (data.success) {
+            if (data.data && data.data.length > 0) {
+                renderCombinedLogs(data.data);
+            } else {
+                contentDiv.innerHTML = `<div class="error">${data.message || '로그가 없습니다.'}</div>`;
+            }
+        } else {
+            contentDiv.innerHTML = `<div class="error">${data.message || data.error || '로그 조회 실패'}</div>`;
+        }
+    } catch (error) {
+        console.error('[로그 조회 오류]', error);
+        contentDiv.innerHTML = `<div class="error">오류: ${error.message}</div>`;
+    }
+}
+
+function renderLogs(logs, source) {
+    const contentDiv = document.getElementById('logs-content');
+    if (!logs || logs.length === 0) {
+        contentDiv.innerHTML = '<div class="error">로그가 없습니다.</div>';
+        return;
+    }
+    
+    // 최신 100줄만 표시
+    const displayLogs = logs.slice(-100);
+    const html = displayLogs.map(log => {
+        const line = typeof log === 'string' ? log : log.line;
+        // 에러 로그는 빨간색으로 표시
+        if (line.includes('[ERROR]') || line.includes('❌') || line.includes('오류')) {
+            return `<span style="color: #f48771;">${escapeHtml(line)}</span>`;
+        }
+        // 경고 로그는 노란색으로 표시
+        if (line.includes('[WARN]') || line.includes('⚠️') || line.includes('경고')) {
+            return `<span style="color: #dcdcaa;">${escapeHtml(line)}</span>`;
+        }
+        // 성공 로그는 초록색으로 표시
+        if (line.includes('[INFO]') && (line.includes('✅') || line.includes('성공'))) {
+            return `<span style="color: #4ec9b0;">${escapeHtml(line)}</span>`;
+        }
+        return escapeHtml(line);
+    }).join('\n');
+    
+    contentDiv.innerHTML = html;
+    // 스크롤을 맨 아래로
+    contentDiv.scrollTop = contentDiv.scrollHeight;
+}
+
+function renderCombinedLogs(logs) {
+    const contentDiv = document.getElementById('logs-content');
+    if (!logs || logs.length === 0) {
+        contentDiv.innerHTML = '<div class="error">로그가 없습니다.</div>';
+        return;
+    }
+    
+    // 최신 100줄만 표시
+    const displayLogs = logs.slice(-100);
+    const html = displayLogs.map(log => {
+        const source = log.source || 'unknown';
+        const line = log.line || '';
+        const sourceColor = source === 'server' ? '#569cd6' : '#ce9178';
+        const sourceLabel = source === 'server' ? '[SERVER]' : '[CLIENT]';
+        
+        let lineHtml = `<span style="color: ${sourceColor};">${sourceLabel}</span> `;
+        
+        // 에러 로그는 빨간색으로 표시
+        if (line.includes('[ERROR]') || line.includes('❌') || line.includes('오류')) {
+            lineHtml += `<span style="color: #f48771;">${escapeHtml(line)}</span>`;
+        }
+        // 경고 로그는 노란색으로 표시
+        else if (line.includes('[WARN]') || line.includes('⚠️') || line.includes('경고')) {
+            lineHtml += `<span style="color: #dcdcaa;">${escapeHtml(line)}</span>`;
+        }
+        // 성공 로그는 초록색으로 표시
+        else if (line.includes('[INFO]') && (line.includes('✅') || line.includes('성공'))) {
+            lineHtml += `<span style="color: #4ec9b0;">${escapeHtml(line)}</span>`;
+        }
+        else {
+            lineHtml += escapeHtml(line);
+        }
+        
+        return lineHtml;
+    }).join('\n');
+    
+    contentDiv.innerHTML = html;
+    // 스크롤을 맨 아래로
+    contentDiv.scrollTop = contentDiv.scrollHeight;
+}
+
+function copyLogs() {
+    const contentDiv = document.getElementById('logs-content');
+    const text = contentDiv.textContent || contentDiv.innerText;
+    
+    // 클립보드에 복사
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            alert('로그가 클립보드에 복사되었습니다.');
+        }).catch(err => {
+            // Fallback: 텍스트 영역 사용
+            copyToClipboardFallback(text);
+        });
+    } else {
+        copyToClipboardFallback(text);
+    }
+}
+
+function copyToClipboardFallback(text) {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+    alert('로그가 클립보드에 복사되었습니다.');
+}
+
+
+
+
+
 

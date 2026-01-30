@@ -88,3 +88,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 - Release APK는 서명되지 않은 상태입니다 (디버그용)
 - 프로덕션 배포 시 서명 키로 서명 필요
 
+
+
+
+

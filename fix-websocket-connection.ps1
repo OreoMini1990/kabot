@@ -34,12 +34,12 @@ try {
 
 # 4. WebSocket 연결 테스트
 Write-Host "`n[4] WebSocket 연결 테스트:" -ForegroundColor Yellow
-$wsUrl = "ws://211.218.42.222:5002/ws"
+$wsUrl = "ws://192.168.0.15:5002/ws"
 Write-Host "WebSocket URL: $wsUrl"
 
 # PowerShell로 WebSocket 테스트 (간단한 HTTP 요청으로 확인)
 try {
-    $response = Invoke-WebRequest -Uri "http://211.218.42.222:5002" -Method GET -TimeoutSec 5 -ErrorAction Stop
+    $response = Invoke-WebRequest -Uri "http://192.168.0.15:5002" -Method GET -TimeoutSec 5 -ErrorAction Stop
     Write-Host "✓ HTTP 서버 응답: $($response.StatusCode)" -ForegroundColor Green
 } catch {
     Write-Host "✗ HTTP 서버 연결 실패: $_" -ForegroundColor Red
@@ -59,6 +59,15 @@ Write-Host "`n4. 환경변수 확인:" -ForegroundColor Cyan
 Write-Host "   .env 파일의 PORT, SERVER_URL 확인" -ForegroundColor White
 
 Write-Host "`n=== 확인 완료 ===" -ForegroundColor Green
+
+
+
+
+
+
+
+
+
 
 
 

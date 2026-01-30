@@ -406,6 +406,27 @@ class KakaoAutomationService : AccessibilityService() {
                 return AutomationResult.Failed("TIMEOUT", "활성 루트를 찾을 수 없습니다")
                 }
                 
+                // 2-1. 덤프 생성하여 노드 구조 파악 (접근성 제어 개선)
+                Log.i(TAG, "═══════════════════════════════════════════════════════")
+                Log.i(TAG, "📋 UI 덤프 생성 중... (접근성 제어 개선)")
+                Log.i(TAG, "═══════════════════════════════════════════════════════")
+                try {
+                    // AccessibilityService에서 rootInActiveWindow를 사용하여 노드 트리 덤프
+                    val root = getActiveRoot()
+                    if (root != null) {
+                        Log.i(TAG, "✅ 활성 루트 노드 발견, 노드 구조 분석 중...")
+                        // 노드 트리를 순회하여 덤프 정보 수집
+                        val nodeInfo = StringBuilder()
+                        dumpNodeTree(root, nodeInfo, 0, 3) // 최대 3단계 깊이까지
+                        Log.d(TAG, "📋 UI 노드 구조 (처음 1000자):\n${nodeInfo.toString().take(1000)}")
+                        Log.i(TAG, "✅ UI 덤프 생성 완료")
+                    } else {
+                        Log.w(TAG, "⚠️ 활성 루트 노드를 찾을 수 없음 (계속 진행)")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "⚠️ UI 덤프 생성 중 오류 발생 (계속 진행): ${e.message}")
+                }
+                
                 // 3. 메시지 텍스트로 메시지 찾기 (부분 일치)
                 Log.i(TAG, "메시지 찾는 중: \"${messageText.take(30)}...\"")
                 val messageNode = findNodeByTextContains(messageText)
@@ -510,6 +531,35 @@ class KakaoAutomationService : AccessibilityService() {
     private fun isKakaoTalkActive(): Boolean {
         val root = getActiveRoot()
         return root != null && root.packageName == KAKAO_TALK_PACKAGE
+    }
+    
+    /**
+     * 노드 트리를 재귀적으로 덤프 (디버깅용)
+     */
+    private fun dumpNodeTree(node: AccessibilityNodeInfo?, sb: StringBuilder, depth: Int, maxDepth: Int) {
+        if (node == null || depth > maxDepth) return
+        
+        val indent = "  ".repeat(depth)
+        val className = node.className?.toString() ?: "null"
+        val text = node.text?.toString()?.take(50) ?: ""
+        val desc = node.contentDescription?.toString()?.take(50) ?: ""
+        val viewId = node.viewIdResourceName ?: ""
+        val isClickable = node.isClickable
+        val isFocusable = node.isFocusable
+        
+        sb.append("$indent[Node] className=$className")
+        if (text.isNotEmpty()) sb.append(", text=\"$text\"")
+        if (desc.isNotEmpty()) sb.append(", desc=\"$desc\"")
+        if (viewId.isNotEmpty()) sb.append(", viewId=$viewId")
+        if (isClickable) sb.append(", clickable")
+        if (isFocusable) sb.append(", focusable")
+        sb.append("\n")
+        
+        for (i in 0 until node.childCount) {
+            node.getChild(i)?.let { child ->
+                dumpNodeTree(child, sb, depth + 1, maxDepth)
+            }
+        }
     }
 }
 

@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  kakkaobot-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: kakkaobot-server
+    ports:
+      - "5002:5002"
+    env_file:
+      - server/.env
+    environment:
+      - NODE_ENV=production
+      - PORT=5002
+      - TZ=Asia/Seoul
+    volumes:
+      # 로그 파일을 호스트에 마운트 (선택사항)
+      - ./server/logs:/app/server/logs
+      # .env 파일을 직접 마운트 (선택사항, env_file 사용 시 불필요)
+      # - ./server/.env:/app/server/.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+
+
+
+
+
+
+
+
+

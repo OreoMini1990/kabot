@@ -112,6 +112,28 @@ async function getOrCreateUser(roomName, senderName, senderId) {
                     console.error('[닉네임 변경] 사용자 정보 업데이트 실패:', updateError.message);
                 } else {
                     console.log('[닉네임 변경] 사용자 정보 업데이트 완료');
+                    
+                    // 닉네임 변경 안내 메시지 생성 및 반환
+                    const notification = `📝 닉네임이 변경되었습니다.\n\n` +
+                        `이전: ${existingUser.display_name}\n` +
+                        `현재: ${senderName}\n\n` +
+                        `변경 이력은 채팅 로그에 기록되었습니다.`;
+                    
+                    // 전역 함수를 통해 메시지 전송
+                    if (typeof global.sendNicknameChangeNotification === 'function') {
+                        global.sendNicknameChangeNotification(roomName, notification);
+                        console.log('[닉네임 변경] ✅ 안내 메시지 전송 완료');
+                    } else {
+                        // 전역 함수가 없으면 메시지를 저장하여 나중에 전송
+                        if (!global.pendingNicknameNotifications) {
+                            global.pendingNicknameNotifications = [];
+                        }
+                        global.pendingNicknameNotifications.push({
+                            roomName: roomName,
+                            message: notification
+                        });
+                        console.log('[닉네임 변경] ⚠️ 전역 함수 없음, 대기 목록에 추가');
+                    }
                 }
                 
                 // 업데이트된 정보 반영
@@ -247,12 +269,17 @@ async function ensureRoomMembership(roomId, userId, role = 'member') {
  */
 async function saveChatMessage(roomName, senderName, senderId, messageText, isGroupChat = true, metadata = null, replyToMessageId = null, threadId = null, rawSender = null, kakaoLogId = null, replyToKakaoLogId = null) {
     try {
+        // ⚠️ 중요: 함수 호출 시작 로그
+        console.log(`[채팅 로그] ⚠️⚠️⚠️ saveChatMessage 호출: roomName="${roomName}", senderName="${senderName}", senderId="${senderId}", messageText_length=${messageText?.length || 0}, kakaoLogId=${kakaoLogId || 'N/A'}`);
+        
         // 정규화된 사용자 및 채팅방 조회/생성
         const user = await getOrCreateUser(roomName, senderName, senderId);
         const room = await getOrCreateRoom(roomName, isGroupChat ? 'group' : 'direct');
         
+        console.log(`[채팅 로그] ⚠️⚠️⚠️ 사용자/채팅방 조회 결과: user=${user ? `id=${user.id}` : 'null'}, room=${room ? `id=${room.id}` : 'null'}`);
+        
         if (!user || !room) {
-            console.error('[채팅 로그] 사용자 또는 채팅방 조회 실패');
+            console.error(`[채팅 로그] ❌❌❌ 사용자 또는 채팅방 조회 실패: user=${!!user}, room=${!!room}`);
             // 정규화 실패 시에도 기존 방식으로 저장 (하위 호환성)
         }
         
@@ -286,42 +313,143 @@ async function saveChatMessage(roomName, senderName, senderId, messageText, isGr
             _id: kakaoLogId || metadata?._id  // metadata에도 저장 (이중화)
         };
         
+        // ⚠️ 중요: 답장 메시지인 경우 원문 내용 조회 및 저장
+        let replyToMessageText = null;
+        let replyToSenderName = null;
+        if (replyToMessageId || replyToKakaoLogId) {
+            try {
+                let targetMessage = null;
+                
+                // 1순위: reply_to_message_id로 조회
+                if (replyToMessageId) {
+                    const { data: msgById } = await db.supabase
+                        .from('chat_messages')
+                        .select('message_text, sender_name')
+                        .eq('id', replyToMessageId)
+                        .eq('room_name', roomName)
+                        .maybeSingle();
+                    
+                    if (msgById) {
+                        targetMessage = msgById;
+                    }
+                }
+                
+                // 2순위: reply_to_kakao_log_id로 조회 (metadata에서 조회)
+                if (!targetMessage && replyToKakaoLogId) {
+                    const numericLogId = parseInt(replyToKakaoLogId);
+                    if (!isNaN(numericLogId)) {
+                        const { data: msgByLogId } = await db.supabase
+                            .from('chat_messages')
+                            .select('message_text, sender_name')
+                            .eq('metadata->>kakao_log_id', String(numericLogId))  // ✅ metadata에서 kakao_log_id 조회
+                            .eq('room_name', roomName)
+                            .maybeSingle();
+                        
+                        if (msgByLogId) {
+                            targetMessage = msgByLogId;
+                        }
+                    }
+                }
+                
+                if (targetMessage) {
+                    replyToMessageText = targetMessage.message_text;
+                    replyToSenderName = targetMessage.sender_name;
+                    console.log(`[채팅 로그] ✅ 답장 원문 내용 조회 성공: 원문 길이=${replyToMessageText?.length || 0}, 원문 발신자="${replyToSenderName}"`);
+                } else {
+                    console.log(`[채팅 로그] ⚠️ 답장 원문 내용 조회 실패: reply_to_message_id=${replyToMessageId}, reply_to_kakao_log_id=${replyToKakaoLogId}`);
+                }
+            } catch (err) {
+                console.error(`[채팅 로그] 답장 원문 내용 조회 오류:`, err.message);
+            }
+        }
+        
+        // ⚠️ 중요: finalMetadata에 kakao_log_id, reply_to_kakao_log_id, raw_sender 저장
+        // (DB 스키마에 이 컬럼들이 없으므로 metadata에 저장)
+        if (kakaoLogId) {
+            if (!finalMetadata) finalMetadata = {};
+            finalMetadata.kakao_log_id = kakaoLogId;
+        }
+        if (replyToKakaoLogId) {
+            if (!finalMetadata) finalMetadata = {};
+            finalMetadata.reply_to_kakao_log_id = replyToKakaoLogId;
+        }
+        if (rawSender) {
+            if (!finalMetadata) finalMetadata = {};
+            finalMetadata.raw_sender = rawSender;
+        }
+        
+        // insert 데이터 구성 (chat_id는 조건부로 포함)
+        // ⚠️ 중요: DB 스키마에 없는 컬럼(raw_sender, kakao_log_id, reply_to_kakao_log_id)은 metadata에 저장
+        const insertData = {
+            room_id: room?.id || null,
+            room_name: roomName,
+            user_id: user?.id || null,
+            sender_name: senderName,
+            sender_id: senderId || null,
+            // raw_sender: rawSender || null,  // ❌ DB 스키마에 없음 → metadata에 저장
+            message_text: messageText,
+            message_type: messageType,
+            is_group_chat: isGroupChat,
+            word_count: wordCount,
+            char_count: charCount,
+            has_mention: hasMention,
+            has_url: hasUrl,
+            has_image: hasImage,
+            has_file: hasFile,
+            has_video: hasVideo,
+            has_location: hasLocation,
+            reply_to_message_id: replyToMessageId || null,  // DB id (FK, 백필 가능)
+            // reply_to_kakao_log_id: replyToKakaoLogId || null,  // ❌ DB 스키마에 없음 → metadata에 저장
+            thread_id: threadId || null,
+            // kakao_log_id: kakaoLogId || null,  // ❌ DB 스키마에 없음 → metadata에 저장
+            metadata: finalMetadata || null
+        };
+        
+        // ⚠️ 중요: 답장 메시지인 경우 원문 내용을 metadata에 저장
+        // (스키마에 reply_to_message_text 컬럼이 없으므로 metadata에 저장)
+        if (replyToMessageText) {
+            if (!insertData.metadata) {
+                insertData.metadata = {};
+            }
+            insertData.metadata.reply_to_message_text = replyToMessageText;
+            insertData.metadata.reply_to_sender_name = replyToSenderName;
+            console.log(`[채팅 로그] ✅ 답장 원문 내용 metadata에 저장: 원문 길이=${replyToMessageText.length}`);
+        }
+        
+        // chat_id 추가 (metadata에서 추출, 있으면만 추가)
+        // ⚠️ 중요: chat_id 컬럼이 DB에 없으면 에러 발생하므로, 주석 처리하여 안전하게 처리
+        // chat_id는 metadata에만 저장하고 별도 컬럼으로는 저장하지 않음
+        // const chatIdValue = metadata?.chat_id || metadata?._chat_id;
+        // if (chatIdValue) {
+        //     // 숫자로 변환 시도
+        //     const chatIdNum = typeof chatIdValue === 'string' ? parseInt(chatIdValue, 10) : chatIdValue;
+        //     if (!isNaN(chatIdNum) && chatIdNum > 0) {
+        //         insertData.chat_id = chatIdNum;
+        //     }
+        // }
+        
+        // ⚠️ 중요: 저장 시도 전 로그
+        console.log(`[채팅 로그] ⚠️⚠️⚠️ 메시지 저장 시도 시작: kakao_log_id=${kakaoLogId || 'N/A'}, room="${roomName}", sender="${senderName}", message_length=${messageText?.length || 0}`);
+        console.log(`[채팅 로그] ⚠️⚠️⚠️ insertData 구조:`, JSON.stringify(insertData, null, 2).substring(0, 1000));
+        
         const { data, error } = await db.supabase
             .from('chat_messages')
-            .insert({
-                room_id: room?.id || null,
-                room_name: roomName,
-                user_id: user?.id || null,
-                sender_name: senderName,
-                sender_id: senderId || null,
-                raw_sender: rawSender || null,  // ✅ Phase 1.3: 원본 sender 문자열
-                message_text: messageText,
-                message_type: messageType,
-                is_group_chat: isGroupChat,
-                word_count: wordCount,
-                char_count: charCount,
-                has_mention: hasMention,
-                has_url: hasUrl,
-                has_image: hasImage,
-                has_file: hasFile,
-                has_video: hasVideo,
-                has_location: hasLocation,
-                reply_to_message_id: replyToMessageId || null,
-                thread_id: threadId || null,
-                kakao_log_id: kakaoLogId || null,  // ✅ Phase 1.3: 카카오톡 원본 logId
-                metadata: finalMetadata || null
-            })
+            .insert(insertData)
             .select()
             .single();
         
         if (error) {
-            console.error('[채팅 로그] 메시지 저장 실패:', error.message);
+            console.error(`[채팅 로그] ❌❌❌ 메시지 저장 실패: kakao_log_id=${kakaoLogId || 'N/A'}, room="${roomName}", sender="${senderName}"`);
+            console.error(`[채팅 로그] ❌❌❌ 에러 메시지: ${error.message}`);
+            console.error(`[채팅 로그] ❌❌❌ 에러 상세:`, error);
             console.error('[채팅 로그] 저장 시도 데이터:', {
                 room_name: roomName,
                 sender_name: senderName,
                 sender_id: senderId,
                 message_text_length: messageText?.length || 0,
-                message_type: messageType
+                message_type: messageType,
+                kakao_log_id: kakaoLogId,
+                insertData_keys: Object.keys(insertData)
             });
             return null;
         }
@@ -332,8 +460,16 @@ async function saveChatMessage(roomName, senderName, senderId, messageText, isGr
             sender_name: senderName,
             sender_id: senderId,
             message_text_preview: messageText?.substring(0, 50) + (messageText?.length > 50 ? '...' : ''),
-            message_type: messageType
+            message_type: messageType,
+            reply_to_message_id: replyToMessageId,
+            reply_to_kakao_log_id: replyToKakaoLogId,
+            kakao_log_id: kakaoLogId
         });
+        
+        // reply_to_kakao_log_id 저장 확인
+        if (replyToKakaoLogId) {
+            console.log(`[채팅 로그] ✅ reply_to_kakao_log_id 저장: ${replyToKakaoLogId}`);
+        }
         
         // 멘션 저장 (비동기)
         if (hasMention && data) {
@@ -377,22 +513,27 @@ async function saveChatMessage(roomName, senderName, senderId, messageText, isGr
  */
 async function backfillReplyLink(messageId, roomName, replyToKakaoLogId) {
     try {
+        console.log(`[백필] ⚠️⚠️⚠️ 백필 시작: messageId=${messageId}, roomName="${roomName}", replyToKakaoLogId=${replyToKakaoLogId}`);
+        
         if (!replyToKakaoLogId || !roomName) {
+            console.warn(`[백필] ⚠️ 파라미터 누락: replyToKakaoLogId=${replyToKakaoLogId}, roomName="${roomName}"`);
             return;
         }
         
         // 안전한 숫자 파싱
         const numericLogId = safeParseInt(replyToKakaoLogId);
         if (!numericLogId) {
+            console.warn(`[백필] ⚠️ 숫자 파싱 실패: replyToKakaoLogId=${replyToKakaoLogId}`);
             return;
         }
         
-        // 같은 room에서 kakao_log_id로 답장 대상 메시지 찾기
-        const { data: targetMessage, error } = await db.supabase
+        // 1순위: 같은 room에서 metadata.kakao_log_id로 답장 대상 메시지 찾기
+        // ⚠️ 중요: DB 스키마에 kakao_log_id 컬럼이 없으므로 metadata에서 조회
+        let { data: targetMessage, error } = await db.supabase
             .from('chat_messages')
             .select('id')
-            .eq('kakao_log_id', numericLogId)
             .eq('room_name', roomName)  // ✅ room scope로 제한
+            .eq('metadata->>kakao_log_id', String(numericLogId))  // ✅ metadata에서 kakao_log_id 조회
             .maybeSingle();  // ✅ single() 대신 maybeSingle() 사용
         
         if (error) {
@@ -400,23 +541,98 @@ async function backfillReplyLink(messageId, roomName, replyToKakaoLogId) {
             return;
         }
         
-        if (targetMessage && targetMessage.id) {
+        // 2순위: metadata.kakao_log_id로 찾지 못한 경우, 답장 메시지의 생성 시간을 고려해서 가장 가까운 메시지 찾기
+        if (!targetMessage || !targetMessage.id) {
+            console.log(`[백필] ⚠️ metadata.kakao_log_id로 찾지 못함, 시간대 기반 검색 시도: kakao_log_id=${numericLogId}, room="${roomName}"`);
+            
+            // 답장 메시지의 생성 시간 가져오기
+            const { data: replyMessage, error: replyError } = await db.supabase
+                .from('chat_messages')
+                .select('created_at')
+                .eq('id', messageId)
+                .single();
+            
+            if (replyError || !replyMessage) {
+                console.warn(`[백필] 답장 메시지 조회 실패: ${replyError?.message || 'not found'}`);
+                return;
+            }
+            
+            // 답장 메시지보다 이전에 생성된 메시지 중에서 가장 가까운 메시지 찾기
+            // (답장은 보통 원문 메시지 직후에 생성되므로, 최근 10개 메시지 중에서 찾기)
+            const { data: recentMessages, error: recentError } = await db.supabase
+                .from('chat_messages')
+                .select('id, created_at, metadata')
+                .eq('room_name', roomName)
+                .lt('created_at', replyMessage.created_at)  // 답장 메시지보다 이전
+                .order('created_at', { ascending: false })
+                .limit(10);
+            
+            if (recentError) {
+                console.warn(`[백필] 최근 메시지 조회 실패: ${recentError.message}`);
+                return;
+            }
+            
+            if (recentMessages && recentMessages.length > 0) {
+                // 가장 가까운 메시지를 원문으로 간주 (답장은 보통 원문 직후에 생성됨)
+                targetMessage = { id: recentMessages[0].id };
+                console.log(`[백필] ⚠️ 시간대 기반 검색으로 원문 메시지 찾음: message_id=${targetMessage.id}, kakao_log_id=${recentMessages[0].metadata?.kakao_log_id || recentMessages[0].metadata?._id || 'N/A'}`);
+                console.log(`[백필] ⚠️⚠️⚠️ targetMessage 확인: id=${targetMessage.id}, 타입=${typeof targetMessage.id}`);
+            } else {
+                console.log(`[백필] 답장 대상 메시지 미발견 (레이스 조건): kakao_log_id=${numericLogId}, room="${roomName}"`);
+                return;
+            }
+        }
+        
+        console.log(`[백필] ⚠️⚠️⚠️ 업데이트 전 확인: targetMessage=${targetMessage ? JSON.stringify(targetMessage) : 'null'}, messageId=${messageId}`);
+        
+        if (!targetMessage) {
+            console.warn(`[백필] ⚠️ targetMessage가 null입니다. messageId=${messageId}`);
+            return;
+        }
+        
+        if (!targetMessage.id) {
+            console.warn(`[백필] ⚠️ targetMessage.id가 없습니다. targetMessage=${JSON.stringify(targetMessage)}, messageId=${messageId}`);
+            return;
+        }
+        
+        try {
+            console.log(`[백필] ⚠️⚠️⚠️ 업데이트 시작: messageId=${messageId}, targetMessageId=${targetMessage.id}`);
+            
             // reply_to_message_id 업데이트
-            const { error: updateError } = await db.supabase
+            // ⚠️ 중요: Supabase에서 null 비교는 .is()를 사용해야 함
+            const { data: updateData, error: updateError } = await db.supabase
                 .from('chat_messages')
                 .update({ reply_to_message_id: targetMessage.id })
                 .eq('id', messageId)
-                .eq('reply_to_message_id', null);  // null인 경우만 업데이트
+                .is('reply_to_message_id', null)  // null인 경우만 업데이트 (eq 대신 is 사용)
+                .select('id, reply_to_message_id');  // 업데이트 결과 확인용
+            
+            console.log(`[백필] ⚠️⚠️⚠️ 업데이트 결과: updateError=${updateError ? updateError.message : 'null'}, updateData=${updateData ? JSON.stringify(updateData) : 'null'}, updateData.length=${updateData ? updateData.length : 0}`);
             
             if (updateError) {
                 console.warn(`[백필] 답장 링크 업데이트 실패: ${updateError.message}`);
-            } else {
+            } else if (updateData && updateData.length > 0) {
                 console.log(`[백필] ✅ 답장 링크 연결 완료: message_id=${messageId}, reply_to_message_id=${targetMessage.id}, kakao_log_id=${numericLogId}`);
+            } else {
+                // 이미 업데이트되었거나 조건에 맞지 않는 경우
+                console.log(`[백필] ⚠️ 업데이트 결과가 비어있음, 현재 상태 확인 중...`);
+                const { data: checkData, error: checkError } = await db.supabase
+                    .from('chat_messages')
+                    .select('id, reply_to_message_id')
+                    .eq('id', messageId)
+                    .single();
+                
+                if (checkError) {
+                    console.warn(`[백필] ⚠️ 상태 확인 실패: ${checkError.message}`);
+                } else if (checkData && checkData.reply_to_message_id) {
+                    console.log(`[백필] ⚠️ 이미 연결됨: message_id=${messageId}, reply_to_message_id=${checkData.reply_to_message_id}`);
+                } else {
+                    console.warn(`[백필] ⚠️ 업데이트 실패: message_id=${messageId}, 영향받은 행=0개, 현재 reply_to_message_id=${checkData?.reply_to_message_id || 'null'}`);
+                }
             }
-        } else {
-            // 아직 답장 대상 메시지가 DB에 없음 (레이스 조건)
-            // 나중에 주기적 백필 작업에서 다시 시도됨
-            console.log(`[백필] 답장 대상 메시지 미발견 (레이스 조건): kakao_log_id=${numericLogId}, room="${roomName}"`);
+        } catch (updateException) {
+            console.error(`[백필] ⚠️ 업데이트 중 예외 발생: ${updateException.message}`);
+            console.error(`[백필] 스택: ${updateException.stack}`);
         }
     } catch (error) {
         console.error('[백필] 백필 작업 중 오류:', error.message);
@@ -430,12 +646,23 @@ async function backfillReplyLink(messageId, roomName, replyToKakaoLogId) {
 async function backfillAllPendingReplies() {
     try {
         // reply_to_kakao_log_id는 있지만 reply_to_message_id가 null인 메시지들 찾기
-        const { data: pendingMessages, error } = await db.supabase
+        // ⚠️ 중요: reply_to_kakao_log_id는 metadata에 저장되므로 metadata를 포함해서 조회
+        const { data: allMessages, error } = await db.supabase
             .from('chat_messages')
-            .select('id, room_name, reply_to_kakao_log_id')
-            .not('reply_to_kakao_log_id', 'is', null)
+            .select('id, room_name, metadata, reply_to_message_id')
             .is('reply_to_message_id', null)
-            .limit(100);  // 한 번에 최대 100개 처리
+            .limit(200);  // 더 많이 조회해서 필터링
+        
+        if (error) {
+            console.error('[백필] pending 메시지 조회 실패:', error.message);
+            return;
+        }
+        
+        // metadata에 reply_to_kakao_log_id가 있는 메시지만 필터링
+        const pendingMessages = (allMessages || []).filter(msg => {
+            const replyToKakaoLogId = msg.metadata?.reply_to_kakao_log_id;
+            return replyToKakaoLogId != null;
+        }).slice(0, 100);  // 최대 100개 처리
         
         if (error) {
             console.error('[백필] pending 메시지 조회 실패:', error.message);
@@ -453,18 +680,48 @@ async function backfillAllPendingReplies() {
         
         for (const msg of pendingMessages) {
             try {
-                const numericLogId = safeParseInt(msg.reply_to_kakao_log_id);
+                // ⚠️ 중요: reply_to_kakao_log_id는 metadata에 저장됨
+                const replyToKakaoLogId = msg.metadata?.reply_to_kakao_log_id;
+                const numericLogId = safeParseInt(replyToKakaoLogId);
                 if (!numericLogId) {
                     continue;
                 }
                 
-                // 같은 room에서 답장 대상 메시지 찾기
-                const { data: targetMessage, error: findError } = await db.supabase
+                // 1순위: 같은 room에서 metadata.kakao_log_id로 답장 대상 메시지 찾기
+                let { data: targetMessage, error: findError } = await db.supabase
                     .from('chat_messages')
                     .select('id')
-                    .eq('kakao_log_id', numericLogId)
+                    .eq('metadata->>kakao_log_id', String(numericLogId))  // ✅ metadata에서 kakao_log_id 조회
                     .eq('room_name', msg.room_name)
                     .maybeSingle();
+                
+                // 2순위: metadata.kakao_log_id로 찾지 못한 경우, 시간대 기반 검색
+                if (findError || !targetMessage) {
+                    // 답장 메시지의 생성 시간 가져오기
+                    const { data: replyMessage, error: replyError } = await db.supabase
+                        .from('chat_messages')
+                        .select('created_at')
+                        .eq('id', msg.id)
+                        .single();
+                    
+                    if (!replyError && replyMessage) {
+                        // 답장 메시지보다 이전에 생성된 메시지 중에서 가장 가까운 메시지 찾기
+                        const { data: recentMessages, error: recentError } = await db.supabase
+                            .from('chat_messages')
+                            .select('id, created_at, metadata')
+                            .eq('room_name', msg.room_name)
+                            .lt('created_at', replyMessage.created_at)  // 답장 메시지보다 이전
+                            .order('created_at', { ascending: false })
+                            .limit(10);
+                        
+                        if (!recentError && recentMessages && recentMessages.length > 0) {
+                            // 가장 가까운 메시지를 원문으로 간주
+                            targetMessage = { id: recentMessages[0].id };
+                            findError = null;
+                            console.log(`[백필] ⚠️ 시간대 기반 검색으로 원문 메시지 찾음: message_id=${targetMessage.id}, reply_message_id=${msg.id}`);
+                        }
+                    }
+                }
                 
                 if (findError || !targetMessage) {
                     failCount++;
@@ -472,11 +729,12 @@ async function backfillAllPendingReplies() {
                 }
                 
                 // reply_to_message_id 업데이트
+                // ⚠️ 중요: Supabase에서 null 비교는 .is()를 사용해야 함
                 const { error: updateError } = await db.supabase
                     .from('chat_messages')
                     .update({ reply_to_message_id: targetMessage.id })
                     .eq('id', msg.id)
-                    .eq('reply_to_message_id', null);
+                    .is('reply_to_message_id', null);  // null인 경우만 업데이트 (eq 대신 is 사용)
                 
                 if (updateError) {
                     failCount++;
@@ -634,58 +892,101 @@ async function updateUserStatistics(roomName, senderName, senderId, wordCount, c
  * @param {boolean} isAdminReaction - 관리자 반응 여부
  */
 async function saveReaction(messageId, reactionType, reactorName, reactorId, isAdminReaction = false) {
+    console.log(`[반응 저장] ========== saveReaction 호출 시작 ==========`);
+    console.log(`[반응 저장] [1단계] 파라미터 확인:`);
+    console.log(`  - messageId: ${messageId} (type: ${typeof messageId})`);
+    console.log(`  - reactionType: ${reactionType}`);
+    console.log(`  - reactorName: ${reactorName || 'null'}`);
+    console.log(`  - reactorId: ${reactorId || 'null'}`);
+    console.log(`  - isAdminReaction: ${isAdminReaction}`);
+    
     try {
         // reactor_id가 없으면 경고 (하지만 저장은 진행)
         if (!reactorId) {
-            console.warn('[반응 저장] ⚠️ reactor_id가 없음: reactorName=', reactorName, ', messageId=', messageId);
+            console.warn('[반응 저장] [1-1] ⚠️ reactor_id가 없음: reactorName=', reactorName, ', messageId=', messageId);
         }
         
         // reactor_name이 없으면 null로 저장 (reactor_id로 식별)
         const finalReactorName = reactorName || null;
+        console.log(`[반응 저장] [1-2] 최종 reactorName: ${finalReactorName || 'null'}`);
+        
+        // 저장할 데이터 구성
+        const insertData = {
+            message_id: messageId,
+            reaction_type: reactionType,
+            reactor_name: finalReactorName,  // null 가능
+            reactor_id: reactorId || null,  // 필수 권장, 없으면 null
+            is_admin_reaction: isAdminReaction
+        };
+        
+        console.log(`[반응 저장] [2단계] DB INSERT 시작:`, JSON.stringify(insertData, null, 2));
         
         const { data, error } = await db.supabase
             .from('chat_reactions')
-            .insert({
-                message_id: messageId,
-                reaction_type: reactionType,
-                reactor_name: finalReactorName,  // null 가능
-                reactor_id: reactorId || null,  // 필수 권장, 없으면 null
-                is_admin_reaction: isAdminReaction
-            })
+            .insert(insertData)
             .select()
             .single();
         
+        console.log(`[반응 저장] [2단계] DB INSERT 완료`);
+        
         if (error) {
+            console.error(`[반응 저장] [2단계] ❌ DB INSERT 오류 발생:`);
+            console.error(`  - error.code: ${error.code}`);
+            console.error(`  - error.message: ${error.message}`);
+            console.error(`  - error.details: ${error.details || 'N/A'}`);
+            console.error(`  - error.hint: ${error.hint || 'N/A'}`);
+            
             // 중복 반응인 경우 무시
             if (error.code === '23505') { // unique_violation
+                console.log(`[반응 저장] [2단계] ⚠️ 중복 반응 감지 (unique_violation)`);
                 if (process.env.DEBUG_REACTION === '1') {
                     console.log('[반응 저장] 중복 반응 (무시):', { messageId, reactionType, reactorName: finalReactorName, reactorId });
                 }
                 return null;
             }
+            
             console.error('[채팅 로그] 반응 저장 실패:', error.message, error.code);
             return null;
         }
         
-        // 반응 통계 업데이트 (비동기, reactorName이 있어도 없어도 처리)
-        if (finalReactorName) {
-            updateReactionStatistics(messageId, finalReactorName, isAdminReaction).catch(err => {
-                console.error('[채팅 로그] 반응 통계 업데이트 실패:', err.message);
-            });
+        if (!data) {
+            console.error(`[반응 저장] [2단계] ❌ DB INSERT 성공했지만 data가 null`);
+            return null;
         }
         
-        if (process.env.DEBUG_REACTION === '1') {
-            console.log('[반응 저장] ✅ 성공:', { 
-                id: data.id, 
-                messageId, 
-                reactionType, 
-                reactorName: finalReactorName, 
-                reactorId 
+        console.log(`[반응 저장] [2단계] ✅ DB INSERT 성공: id=${data.id}`);
+        
+        // 반응 통계 업데이트 (비동기, reactorName이 있어도 없어도 처리)
+        if (finalReactorName) {
+            console.log(`[반응 저장] [3단계] 통계 업데이트 시작 (비동기)`);
+            updateReactionStatistics(messageId, finalReactorName, isAdminReaction).catch(err => {
+                console.error('[반응 저장] [3단계] ❌ 통계 업데이트 실패:', err.message);
+                console.error('[채팅 로그] 반응 통계 업데이트 실패:', err.message);
             });
+        } else {
+            console.log(`[반응 저장] [3단계] 통계 업데이트 스킵 (reactorName 없음)`);
         }
+        
+        // 반응 저장 성공 로그 (항상 출력)
+        console.log('[반응 저장] ✅ 성공:', { 
+            id: data.id, 
+            messageId, 
+            reactionType, 
+            reactorName: finalReactorName, 
+            reactorId 
+        });
+        console.log(`[반응 저장] ========== saveReaction 완료 ==========`);
         
         return data;
     } catch (error) {
+        console.error(`[반응 저장] ========== 예외 발생 ==========`);
+        console.error('[반응 저장] 예외 메시지:', error.message);
+        console.error('[반응 저장] 예외 스택:', error.stack);
+        console.error('[반응 저장] 예외 상세:', JSON.stringify({
+            message: error.message,
+            stack: error.stack,
+            name: error.name
+        }, null, 2));
         console.error('[채팅 로그] 반응 저장 중 오류:', error.message);
         return null;
     }
@@ -1180,24 +1481,13 @@ async function checkNicknameChange(roomName, senderName, senderId) {
             .eq('user_id', existingUser.id)
             .order('changed_at', { ascending: true });
         
-        if (allHistory && allHistory.length > 0) {
-            // 변경 이력 메시지 생성
-            const historyLines = allHistory.map(h => {
-                const date = new Date(h.changed_at).toISOString().split('T')[0];
-                return `\t- ${date} : ${h.old_name} → ${h.new_name}`;
-            });
-            
-            // 현재 변경도 추가
-            const currentDate = new Date().toISOString().split('T')[0];
-            historyLines.push(`\t- ${currentDate} : ${existingUser.display_name} → ${senderName}`);
-            
-            const notification = `🚨 닉네임 변경 감지!\n\n닉네임 변경 되셨습니다. 닉네임변경이력 채팅로그에 변경이력 기록\n\n[닉네임 변경 이력]\n${historyLines.join('\n')}`;
-            return notification;
-        } else {
-            // 이력이 없으면 간단한 메시지
-            const notification = `🚨 닉네임 변경 감지!\n\n닉네임 변경 되셨습니다. 닉네임변경이력 채팅로그에 변경이력 기록\n\n${existingUser.display_name} → ${senderName}`;
-            return notification;
-        }
+        // 깔끔한 닉네임 변경 안내 메시지 생성
+        const notification = `📝 닉네임이 변경되었습니다.\n\n` +
+            `이전: ${existingUser.display_name}\n` +
+            `현재: ${senderName}\n\n` +
+            `변경 이력은 채팅 로그에 기록되었습니다.`;
+        
+        return notification;
     } catch (error) {
         console.error('[채팅 로그] 닉네임 변경 감지 중 오류:', error.message);
         return null;
@@ -1207,63 +1497,85 @@ async function checkNicknameChange(roomName, senderName, senderId) {
 /**
  * 신고 저장
  */
-async function saveReport(reportedMessageId, reporterName, reporterId, reportReason, reportType = 'general') {
+async function saveReport(reportedMessageId, reporterName, reporterId, reportReason, reportType = 'general', roomName = null) {
     try {
-        console.log(`[신고] saveReport 시작: messageId=${reportedMessageId}, reporter=${reporterName}`);
+        console.log(`[신고] saveReport 시작: messageId=${reportedMessageId}, reporter=${reporterName}, room=${roomName || 'N/A'}`);
         
-        // 신고 대상 메시지 조회 (Phase 3: kakao_log_id 기준 통일)
-        // reportedMessageId는 kakao_log_id (카카오톡 원본 logId)를 의미
+        // 신고 대상 메시지 조회 (개선: DB id와 kakao_log_id 모두 지원)
+        // reportedMessageId는 DB id 또는 kakao_log_id일 수 있음
         let message = null;
         
-        // 1. kakao_log_id로 직접 검색 (우선) - Phase 3
-        if (reportedMessageId) {
-            console.log(`[신고] 1. kakao_log_id로 검색: ${reportedMessageId}`);
-            const numericLogId = parseInt(reportedMessageId);
-            if (!isNaN(numericLogId)) {
-                const { data: messageByLogId, error: err1 } = await db.supabase
-            .from('chat_messages')
+        // 1. DB id로 직접 검색 (우선) - 숫자이고 작은 값이면 DB id일 가능성
+        if (reportedMessageId && /^\d+$/.test(String(reportedMessageId))) {
+            const numericId = parseInt(reportedMessageId);
+            // DB id는 보통 작은 숫자 (예: 1, 2, 3...)
+            // kakao_log_id는 매우 큰 숫자 (예: 4959219027917264)
+            if (numericId < 1000000) {  // 100만 미만이면 DB id로 간주
+                console.log(`[신고] 1-1. DB id로 검색 시도: ${numericId}`);
+                let query = db.supabase
+                    .from('chat_messages')
                     .select('*')
-                    .eq('kakao_log_id', numericLogId)
-            .single();
-        
-                if (messageByLogId) {
-                    message = messageByLogId;
-                    console.log(`[신고] ✅ kakao_log_id로 찾음: id=${message.id}, kakao_log_id=${message.kakao_log_id}`);
-        } else {
-                    console.log(`[신고] 1 실패: ${err1?.message || 'not found'}`);
+                    .eq('id', numericId);
+                
+                if (roomName) {
+                    query = query.eq('room_name', roomName);
+                }
+                
+                const { data: messageById, error: err1 } = await query.maybeSingle();
+                
+                if (messageById) {
+                    message = messageById;
+                    const kakaoLogIdFromMetadata = message.metadata?.kakao_log_id || 'N/A';
+                    console.log(`[신고] ✅ DB id로 찾음: id=${message.id}, kakao_log_id=${kakaoLogIdFromMetadata}`);
+                } else {
+                    console.log(`[신고] 1-1 실패: ${err1?.message || 'not found'}`);
                 }
             }
         }
         
-        // 2. fallback: metadata._id로 검색
+        // 2. kakao_log_id로 검색 (DB id 검색 실패 시 또는 큰 숫자인 경우)
         if (!message && reportedMessageId) {
-            console.log(`[신고] 2. metadata._id로 검색: ${reportedMessageId}`);
-            const { data: messageByMetadata, error: err2 } = await db.supabase
+            console.log(`[신고] 2. metadata.kakao_log_id로 검색: ${reportedMessageId}`);
+            const numericLogId = parseInt(reportedMessageId);
+            if (!isNaN(numericLogId)) {
+                let query = db.supabase
+                    .from('chat_messages')
+                    .select('*')
+                    .eq('metadata->>kakao_log_id', String(numericLogId));  // ✅ metadata에서 kakao_log_id 조회
+                
+                if (roomName) {
+                    query = query.eq('room_name', roomName);
+                }
+                
+                const { data: messageByLogId, error: err2 } = await query.maybeSingle();
+                
+                if (messageByLogId) {
+                    message = messageByLogId;
+                    const kakaoLogIdFromMetadata = message.metadata?.kakao_log_id || 'N/A';
+                    console.log(`[신고] ✅ metadata.kakao_log_id로 찾음: id=${message.id}, kakao_log_id=${kakaoLogIdFromMetadata}`);
+                } else {
+                    console.log(`[신고] 2 실패: ${err2?.message || 'not found'}`);
+                }
+            }
+        }
+        
+        // 3. fallback: metadata._id로 검색
+        if (!message && reportedMessageId) {
+            console.log(`[신고] 3. metadata._id로 검색: ${reportedMessageId}`);
+            let query = db.supabase
                 .from('chat_messages')
                 .select('*')
-                .eq('metadata->>_id', String(reportedMessageId))
-                .single();
+                .eq('metadata->>_id', String(reportedMessageId));
+            
+            if (roomName) {
+                query = query.eq('room_name', roomName);
+            }
+            
+            const { data: messageByMetadata, error: err3 } = await query.maybeSingle();
             
             if (messageByMetadata) {
                 message = messageByMetadata;
                 console.log(`[신고] ✅ metadata._id로 찾음: id=${message.id}`);
-            } else {
-                console.log(`[신고] 2 실패: ${err2?.message || 'not found'}`);
-            }
-        }
-        
-        // 3. fallback: DB id로 검색 (숫자인 경우)
-        if (!message && reportedMessageId && /^\d+$/.test(String(reportedMessageId))) {
-            console.log(`[신고] 3. DB id로 검색: ${reportedMessageId}`);
-            const { data: messageById, error: err3 } = await db.supabase
-                        .from('chat_messages')
-                .select('*')
-                .eq('id', parseInt(reportedMessageId))
-                        .single();
-                    
-            if (messageById) {
-                message = messageById;
-                console.log(`[신고] ✅ DB id로 찾음: id=${message.id}`);
             } else {
                 console.log(`[신고] 3 실패: ${err3?.message || 'not found'}`);
             }
@@ -1271,13 +1583,17 @@ async function saveReport(reportedMessageId, reporterName, reporterId, reportRea
         
         // 메시지를 찾지 못한 경우에도 신고 기록은 저장 (메시지 정보 없이)
         if (!message) {
-            console.warn('[신고] 대상 메시지를 찾을 수 없음, 기본 정보로 신고 저장:', reportedMessageId);
+            console.warn('[신고] 대상 메시지를 찾을 수 없음, 기본 정보로 신고 저장:', {
+                reportedMessageId,
+                roomName: roomName || 'N/A',
+                reporter: reporterName
+            });
             
             // 메시지 없이도 신고 저장 시도 (report_logs 테이블 사용)
             try {
                 const moderationLogger = require('./moderationLogger');
                 const result = await moderationLogger.saveReportLog({
-                    roomName: '',  // 알 수 없음
+                    roomName: roomName || '',  // roomName 전달
                     reporterName: reporterName,
                     reporterId: reporterId,
                     reportedMessageId: String(reportedMessageId),
@@ -1289,14 +1605,17 @@ async function saveReport(reportedMessageId, reporterName, reporterId, reportRea
                 });
                 
                 if (result) {
-                    console.log('[신고] report_logs에 저장 성공 (메시지 정보 없음):', result.id);
+                    console.log('[신고] ✅ report_logs에 저장 성공 (메시지 정보 없음):', result.id);
+                    // ⚠️ 중요: 메시지를 찾지 못해도 신고 기록은 저장되었으므로 성공으로 반환
                     return result;
+                } else {
+                    console.error('[신고] ❌ report_logs 저장 실패: result가 null');
+                    return null;
                 }
             } catch (modErr) {
                 console.error('[신고] report_logs 저장 실패:', modErr.message);
+                return null;
             }
-            
-            return null;
         }
         
         // 신고자 사용자 조회/생성
@@ -1357,8 +1676,10 @@ async function saveReport(reportedMessageId, reporterName, reporterId, reportRea
             reported_message_id: reportedMessageId,
             reporter: reporterName,
             reported_user: message.sender_name,
-            original_message: message.message_text.substring(0, 50) + '...',
-            report_reason: reportReason
+            original_message_text: message.message_text ? message.message_text.substring(0, 100) + '...' : '(없음)',
+            original_message_time: message.created_at,
+            report_reason: reportReason,
+            report_type: reportType
         });
         
         return data;
@@ -1375,6 +1696,238 @@ if (typeof setInterval !== 'undefined') {
             console.error('[백필] 주기적 백필 작업 오류:', err.message);
         });
     }, 5 * 60 * 1000);  // 5분마다
+}
+
+/**
+ * 반응 카운트 스냅샷 저장 (chat_reaction_counts 테이블)
+ * @param {string|number} messageId - 메시지 DB id
+ * @param {string|number} kakaoLogId - 카카오톡 로그 ID (선택)
+ * @param {string|number} chatId - 채팅방 ID (선택)
+ * @param {string} roomName - 채팅방 이름 (선택)
+ * @param {number} reactionCount - 반응 개수
+ * @param {string} observedAt - 관찰 시각 (ISO 문자열)
+ */
+async function saveReactionSummary(messageId, kakaoLogId = null, chatId = null, roomName = null, reactionCount, observedAt = null) {
+    try {
+        console.log(`[반응 카운트] saveReactionSummary 시작: messageId=${messageId}, count=${reactionCount}`);
+        
+        const now = new Date().toISOString();
+        const observedAtValue = observedAt || now;
+        
+        const upsertData = {
+            message_id: messageId,
+            reaction_count: reactionCount,
+            last_observed_at: observedAtValue,
+            updated_at: now
+        };
+        
+        if (kakaoLogId) {
+            upsertData.kakao_log_id = typeof kakaoLogId === 'string' ? BigInt(kakaoLogId) : kakaoLogId;
+        }
+        if (chatId) {
+            upsertData.chat_id = typeof chatId === 'string' ? BigInt(chatId) : chatId;
+        }
+        if (roomName) {
+            upsertData.room_name = roomName;
+        }
+        
+        const { data, error } = await db.supabase
+            .from('chat_reaction_counts')
+            .upsert(upsertData, {
+                onConflict: 'message_id'
+            })
+            .select()
+            .single();
+        
+        if (error) {
+            console.error(`[반응 카운트] 저장 실패:`, error);
+            return null;
+        }
+        
+        console.log(`[반응 카운트] ✅ 저장 성공: id=${data.id}, count=${reactionCount}`);
+        return data;
+    } catch (err) {
+        console.error(`[반응 카운트] 예외 발생:`, err.message);
+        return null;
+    }
+}
+
+/**
+ * 반응 개수 변경 이력 저장 (chat_reaction_deltas 테이블)
+ * @param {string|number} messageId - 메시지 DB id
+ * @param {number} oldCount - 이전 반응 개수
+ * @param {number} newCount - 현재 반응 개수
+ * @param {string} observedAt - 관찰 시각 (ISO 문자열)
+ */
+async function saveReactionCountLog(messageId, oldCount, newCount, observedAt = null) {
+    try {
+        console.log(`[반응 delta] saveReactionCountLog 시작: messageId=${messageId}, ${oldCount} -> ${newCount}`);
+        
+        const delta = newCount - oldCount;
+        const observedAtValue = observedAt || new Date().toISOString();
+        
+        const { data, error } = await db.supabase
+            .from('chat_reaction_deltas')
+            .insert({
+                message_id: messageId,
+                delta: delta,
+                old_count: oldCount,
+                new_count: newCount,
+                observed_at: observedAtValue
+            })
+            .select()
+            .single();
+        
+        if (error) {
+            console.error(`[반응 delta] 저장 실패:`, error);
+            return null;
+        }
+        
+        console.log(`[반응 delta] ✅ 저장 성공: id=${data.id}, delta=${delta}`);
+        return data;
+    } catch (err) {
+        console.error(`[반응 delta] 예외 발생:`, err.message);
+        return null;
+    }
+}
+
+/**
+ * 반응 카운트 pending 큐 재처리
+ * 메시지 매핑이 실패했던 반응 카운트 이벤트를 재시도
+ */
+async function processReactionCountPending() {
+    try {
+        console.log(`[반응 pending] 재처리 시작`);
+        
+        // pending 큐에서 항목 조회
+        const { data: pendingItems, error: fetchError } = await db.supabase
+            .from('reaction_count_pending')
+            .select('*')
+            .order('first_seen_at', { ascending: true })
+            .limit(100);  // 한 번에 최대 100개만 처리
+        
+        if (fetchError) {
+            console.error(`[반응 pending] 조회 실패:`, fetchError);
+            return { processed: 0, failed: 0 };
+        }
+        
+        if (!pendingItems || pendingItems.length === 0) {
+            console.log(`[반응 pending] 처리할 항목 없음`);
+            return { processed: 0, failed: 0 };
+        }
+        
+        console.log(`[반응 pending] ${pendingItems.length}개 항목 발견`);
+        
+        let processed = 0;
+        let failed = 0;
+        
+        for (const item of pendingItems) {
+            try {
+                const kakaoLogId = String(item.kakao_log_id);
+                const chatId = item.chat_id;
+                const roomName = item.room_name;
+                const newCount = item.new_count;
+                const observedAt = item.observed_at;
+                
+                console.log(`[반응 pending] 처리 시도: kakao_log_id=${kakaoLogId}, chat_id=${chatId}`);
+                
+                // 메시지 매핑 시도 (우선순위: (kakao_log_id, chat_id) -> (kakao_log_id))
+                let message = null;
+                
+                if (chatId) {
+                    // 1순위: (metadata.kakao_log_id, chat_id)
+                    const { data: msg1 } = await db.supabase
+                        .from('chat_messages')
+                        .select('id, chat_id')
+                        .eq('metadata->>kakao_log_id', String(kakaoLogId))  // ✅ metadata에서 kakao_log_id 조회
+                        .eq('chat_id', String(chatId))
+                        .maybeSingle();
+                    
+                    if (msg1) {
+                        message = msg1;
+                        console.log(`[반응 pending] ✅ 메시지 찾음 (metadata.kakao_log_id, chat_id): message_id=${message.id}`);
+                    }
+                }
+                
+                if (!message) {
+                    // 2순위: (metadata.kakao_log_id) 단독
+                    const { data: msg2 } = await db.supabase
+                        .from('chat_messages')
+                        .select('id, chat_id')
+                        .eq('metadata->>kakao_log_id', String(kakaoLogId))  // ✅ metadata에서 kakao_log_id 조회
+                        .maybeSingle();
+                    
+                    if (msg2) {
+                        message = msg2;
+                        console.log(`[반응 pending] ✅ 메시지 찾음 (kakao_log_id): message_id=${message.id}`);
+                    }
+                }
+                
+                if (!message) {
+                    // 여전히 찾지 못함: 다음 재처리 때 다시 시도
+                    console.log(`[반응 pending] ⏳ 메시지 찾지 못함, 다음 재처리 때 재시도: kakao_log_id=${kakaoLogId}`);
+                    continue;
+                }
+                
+                // 메시지를 찾았으므로 스냅샷 및 로그 저장
+                const messageId = message.id;
+                const messageChatId = message.chat_id;
+                
+                // 기존 카운트 조회 (old_count 계산용)
+                const { data: existingCount } = await db.supabase
+                    .from('chat_reaction_counts')
+                    .select('reaction_count')
+                    .eq('message_id', messageId)
+                    .maybeSingle();
+                
+                const oldCount = existingCount?.reaction_count || 0;
+                
+                // 스냅샷 저장 (upsert)
+                await saveReactionSummary(
+                    messageId,
+                    kakaoLogId,
+                    messageChatId || chatId,
+                    roomName,
+                    newCount,
+                    observedAt
+                );
+                
+                // 변경 이력 저장 (변화가 있을 때만)
+                if (oldCount !== newCount) {
+                    await saveReactionCountLog(
+                        messageId,
+                        oldCount,
+                        newCount,
+                        observedAt
+                    );
+                }
+                
+                // pending 항목 삭제
+                const { error: deleteError } = await db.supabase
+                    .from('reaction_count_pending')
+                    .delete()
+                    .eq('id', item.id);
+                
+                if (deleteError) {
+                    console.error(`[반응 pending] 삭제 실패:`, deleteError);
+                } else {
+                    console.log(`[반응 pending] ✅ 처리 완료 및 삭제: id=${item.id}, message_id=${messageId}`);
+                    processed++;
+                }
+                
+            } catch (itemErr) {
+                console.error(`[반응 pending] 항목 처리 오류 (id=${item.id}):`, itemErr.message);
+                failed++;
+            }
+        }
+        
+        console.log(`[반응 pending] 재처리 완료: 처리=${processed}개, 실패=${failed}개`);
+        return { processed, failed };
+        
+    } catch (err) {
+        console.error(`[반응 pending] 재처리 예외:`, err.message);
+        return { processed: 0, failed: 0 };
+    }
 }
 
 module.exports = {
@@ -1395,6 +1948,9 @@ module.exports = {
     searchMessagesByKeyword,
     aggregateUserStatistics,
     backfillReplyLink,
-    backfillAllPendingReplies
+    backfillAllPendingReplies,
+    saveReactionSummary,
+    saveReactionCountLog,
+    processReactionCountPending
 };
 

@@ -82,3 +82,7 @@ cp server/data/kakkaobot.db server/data/kakkaobot.db.backup
 cp server/data/kakkaobot.db.backup server/data/kakkaobot.db
 ```
 
+
+
+
+

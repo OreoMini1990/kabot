@@ -15,6 +15,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import android.net.Uri
 
 /**
  * 카카오톡 알림 감시 서비스
@@ -178,7 +181,12 @@ class KakaoNotificationListenerService : NotificationListenerService() {
                     }
                     Log.i(TAG, "═══════════════════════════════════════════════════════")
                     
-                    // 3. 해당 roomKey로 대기 중인 전송 요청이 있으면 즉시 처리
+                    // 3. 이미지 미리보기 감지 및 업로드
+                    serviceScope.launch {
+                        detectAndUploadImagePreview(sbn, roomKey)
+                    }
+                    
+                    // 4. 해당 roomKey로 대기 중인 전송 요청이 있으면 즉시 처리
                     serviceScope.launch {
                         processPendingRequests(roomKey)
                     }
@@ -491,6 +499,125 @@ class KakaoNotificationListenerService : NotificationListenerService() {
         val delays = listOf(5000L, 20000L, 60000L, 180000L, 600000L)
         val delay = delays.getOrElse(retryCount - 1) { delays.last() }
         return System.currentTimeMillis() + delay
+    }
+
+    /**
+     * 알림에서 이미지 미리보기 감지 및 업로드
+     */
+    private suspend fun detectAndUploadImagePreview(sbn: StatusBarNotification, roomKey: String) {
+        try {
+            val extras = sbn.notification.extras
+            val messages = extras.getParcelableArray(Notification.EXTRA_MESSAGES)
+            
+            if (messages == null || messages.isEmpty()) {
+                Log.d(TAG, "[이미지 감지] messages 배열 없음")
+                return
+            }
+            
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
+            Log.i(TAG, "[이미지 감지] 알림에서 이미지 미리보기 확인 시작")
+            Log.i(TAG, "  roomKey: \"$roomKey\"")
+            Log.i(TAG, "  messages 개수: ${messages.size}")
+            
+            // 첫 번째 메시지 확인
+            val firstMessage = messages[0] as? android.os.Bundle
+            if (firstMessage == null) {
+                Log.d(TAG, "[이미지 감지] 첫 번째 메시지가 Bundle이 아님")
+                return
+            }
+            
+            // 메시지 타입 확인
+            val messageType = firstMessage.getString("type")
+            Log.d(TAG, "  message type: $messageType")
+            
+            // 이미지 타입 확인 (type이 "image/"로 시작하거나 "image/jpeg", "image/png" 등)
+            val isImageType = messageType?.startsWith("image/") == true || 
+                             messageType == "image" ||
+                             messageType == "2" || // PhotoChat
+                             messageType == "27"  // MultiPhotoChat
+            
+            if (!isImageType) {
+                Log.d(TAG, "[이미지 감지] 이미지 타입 아님: type=$messageType")
+                return
+            }
+            
+            Log.i(TAG, "  ✅ 이미지 타입 감지: $messageType")
+            
+            // Content URI 추출
+            val imageUri = firstMessage.getParcelable<Uri>("uri")
+            if (imageUri == null) {
+                Log.w(TAG, "[이미지 감지] ⚠️ URI 없음")
+                // 다른 키에서 URI 찾기 시도
+                firstMessage.keySet().forEach { key ->
+                    val value = firstMessage.get(key)
+                    if (value is Uri) {
+                        Log.d(TAG, "  URI 발견 (키: $key): $value")
+                    }
+                }
+                return
+            }
+            
+            Log.i(TAG, "  ✅ 이미지 URI 발견: $imageUri")
+            
+            // 발신자 정보 추출
+            val senderName = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+            val senderPerson = firstMessage.getParcelable<android.app.Person>("senderPerson")
+            val senderId = senderPerson?.key ?: senderName
+            
+            // 그룹 채팅 여부
+            val isGroupConversation = extras.getBoolean("android.isGroupConversation", false)
+            
+            // kakaoLogId 추출 (가능하면)
+            val kakaoLogId = firstMessage.getString("id") ?: 
+                            firstMessage.getString("messageId") ?:
+                            firstMessage.getString("logId")
+            
+            Log.i(TAG, "  발신자 정보:")
+            Log.i(TAG, "    senderName: $senderName")
+            Log.i(TAG, "    senderId: $senderId")
+            Log.i(TAG, "    kakaoLogId: $kakaoLogId")
+            Log.i(TAG, "    isGroupConversation: $isGroupConversation")
+            
+            // 즉시 업로드 시도
+            val uploadSuccess = ImagePreviewUploader.uploadImage(
+                context = this@KakaoNotificationListenerService,
+                imageUri = imageUri,
+                room = roomKey,
+                senderId = senderId,
+                senderName = senderName,
+                kakaoLogId = kakaoLogId,
+                isGroupConversation = isGroupConversation
+            )
+            
+            if (uploadSuccess) {
+                Log.i(TAG, "✅ 이미지 업로드 성공 (즉시)")
+            } else {
+                Log.w(TAG, "⚠️ 이미지 업로드 실패 (즉시) - WorkManager로 재시도 예약")
+                
+                // WorkManager로 재시도 예약
+                val workData = ImagePreviewUploadWorker.createWorkData(
+                    imageUri = imageUri,
+                    room = roomKey,
+                    senderId = senderId,
+                    senderName = senderName,
+                    kakaoLogId = kakaoLogId,
+                    isGroup = isGroupConversation
+                )
+                
+                val uploadWork = OneTimeWorkRequestBuilder<ImagePreviewUploadWorker>()
+                    .setInputData(workData)
+                    .build()
+                
+                WorkManager.getInstance(this@KakaoNotificationListenerService)
+                    .enqueue(uploadWork)
+                
+                Log.i(TAG, "  WorkManager 재시도 예약 완료")
+            }
+            
+            Log.i(TAG, "═══════════════════════════════════════════════════════")
+        } catch (e: Exception) {
+            Log.e(TAG, "[이미지 감지] 예외 발생", e)
+        }
     }
 
 }

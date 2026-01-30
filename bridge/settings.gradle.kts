@@ -17,3 +17,7 @@ dependencyResolutionManagement {
 rootProject.name = "KakaoBridge"
 include(":app")
 
+
+
+
+

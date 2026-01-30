@@ -9,7 +9,11 @@
     
     <!-- Specific domain configuration (optional, more secure) -->
     <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">211.218.42.222</domain>
+        <domain includeSubdomains="true">192.168.0.15</domain>
     </domain-config>
 </network-security-config>
+
+
+
+
 

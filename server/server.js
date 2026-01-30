@@ -8,10 +8,11 @@
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { handleMessage, NOTICE_SYSTEM, CONFIG } = require('./labbot-node');
+const { decryptKakaoTalkMessage } = require('./crypto/kakaoDecrypt');
+const logManager = require('./core/logging/logManager');
 
 // 단축 URL 전송 함수 (전역으로 export하여 labbot-node.js에서 사용 가능하도록)
 let sendShortUrlMessageFunction = null;
@@ -22,143 +23,92 @@ function setSendShortUrlMessageFunction(fn) {
 // 후속 메시지 전송 함수 (네이버 카페 API 호출 완료 후 결과 전송용)
 let sendFollowUpMessageFunction = null;
 function setSendFollowUpMessageFunction(fn) {
-    sendFollowUpMessageFunction = fn;
+  sendFollowUpMessageFunction = fn;
 }
+
+// 닉네임 변경 알림 전송 함수 (chatLogger에서 사용)
+// 주의: 이 함수는 나중에 정의되는 getRoomKeyFromCache를 사용하므로,
+// 실제 호출 시점에는 이미 정의되어 있어야 함
+function sendNicknameChangeNotification(roomName, message) {
+  console.log(`[닉네임 변경 알림] 전송 요청: roomName="${roomName}", message="${message.substring(0, 50)}..."`);
+  
+  // roomKey 캐시에서 최신 roomKey 가져오기
+  let cachedRoomKey = roomName || CONFIG.ROOM_KEY || '';
+  
+  // getRoomKeyFromCache가 정의되어 있으면 사용
+  if (typeof getRoomKeyFromCache === 'function') {
+    const cached = getRoomKeyFromCache(roomName);
+    if (cached) {
+      cachedRoomKey = cached;
+      console.log(`[닉네임 변경 알림] 캐시에서 roomKey 찾음: "${cachedRoomKey}" (원본: "${roomName}")`);
+    } else {
+      console.log(`[닉네임 변경 알림] 캐시에서 roomKey를 찾지 못함, 원본 사용: "${cachedRoomKey}"`);
+      if (!cachedRoomKey) {
+        cachedRoomKey = CONFIG.ROOM_KEY || '';
+        console.log(`[닉네임 변경 알림] CONFIG.ROOM_KEY 사용: "${cachedRoomKey}"`);
+      }
+    }
+  } else {
+    console.log(`[닉네임 변경 알림] getRoomKeyFromCache 함수가 아직 정의되지 않음, 원본 사용: "${cachedRoomKey}"`);
+    if (!cachedRoomKey) {
+      cachedRoomKey = CONFIG.ROOM_KEY || '';
+      console.log(`[닉네임 변경 알림] CONFIG.ROOM_KEY 사용: "${cachedRoomKey}"`);
+    }
+  }
+  
+  // 최종 확인: roomKey가 비어있으면 CONFIG.ROOM_KEY 사용
+  if (!cachedRoomKey) {
+    cachedRoomKey = CONFIG.ROOM_KEY || '';
+    console.log(`[닉네임 변경 알림] 최종 fallback: CONFIG.ROOM_KEY="${cachedRoomKey}"`);
+  }
+  
+  // Bridge APK 클라이언트 찾기
+  const bridgeClients = [];
+  if (wss && wss.clients) {
+    for (const client of wss.clients) {
+      if (client.readyState === WebSocket.OPEN && client.isBridge === true) {
+        bridgeClients.push(client);
+      }
+    }
+  }
+  
+  if (bridgeClients.length > 0) {
+    const sendMessage = {
+      type: 'send',
+      id: `nickname-change-${Date.now()}`,
+      roomKey: cachedRoomKey,
+      text: message,
+      ts: Math.floor(Date.now() / 1000)
+    };
+    
+    // 첫 번째 Bridge APK에게 전송
+    bridgeClients[0].send(JSON.stringify(sendMessage));
+    console.log(`[닉네임 변경 알림] ✅ Bridge APK로 전송 완료: roomKey="${cachedRoomKey}"`);
+  } else {
+    console.warn(`[닉네임 변경 알림] ⚠️ Bridge APK 클라이언트가 연결되어 있지 않음`);
+  }
+}
+
+// chatLogger에서 사용할 수 있도록 전역 함수 등록
+// 주의: 이 함수는 나중에 호출되므로, 실제 호출 시점에는 wss와 getRoomKeyFromCache가 정의되어 있어야 함
+global.sendNicknameChangeNotification = sendNicknameChangeNotification;
 
 // CONFIG의 ROOM_KEY가 없으면 ROOM_NAME 사용 (하위 호환성)
 if (!CONFIG.ROOM_KEY) {
     CONFIG.ROOM_KEY = CONFIG.ROOM_NAME;
 }
 const adminRouter = require('./api/admin');
+const bridgeRouter = require('./routes/bridge');
+const naverOAuthRouter = require('./routes/naverOAuth');
 
 const PORT = Number(process.env.PORT || 5002);
 const BOT_ID = process.env.BOT_ID || 'iris-core';
 
 // ============================================
-// 로그 파일 관리 (최근 10개만 유지)
+// 로그 파일 관리 (모듈에서 import)
 // ============================================
-const LOG_DIR = '/home/app/iris-core'; // 로그 저장 디렉토리
-const MAX_LOG_FILES = 10; // 최대 보관 로그 파일 수
-
-// 로그 디렉토리 생성 (없으면 생성)
-try {
-  if (!fs.existsSync(LOG_DIR)) {
-    fs.mkdirSync(LOG_DIR, { recursive: true });
-  }
-} catch (e) {
-  console.error(`[로그] 디렉토리 생성 실패: ${LOG_DIR}`, e.message);
-}
-
-// 로그 파일명 생성 (YYYYMMDD-HHMMSS 형식)
-function getLogFileName() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  const hour = String(now.getHours()).padStart(2, '0');
-  const minute = String(now.getMinutes()).padStart(2, '0');
-  const second = String(now.getSeconds()).padStart(2, '0');
-  return `server-${year}${month}${day}-${hour}${minute}${second}.log`;
-}
-
-// 오래된 로그 파일 정리 (최근 10개만 유지)
-function cleanupOldLogs() {
-  try {
-    const files = fs.readdirSync(LOG_DIR)
-      .filter(file => file.startsWith('server-') && file.endsWith('.log'))
-      .map(file => ({
-        name: file,
-        path: path.join(LOG_DIR, file),
-        mtime: fs.statSync(path.join(LOG_DIR, file)).mtime
-      }))
-      .sort((a, b) => b.mtime - a.mtime); // 최신순 정렬
-
-    // 최근 10개를 제외한 나머지 삭제
-    if (files.length > MAX_LOG_FILES) {
-      const filesToDelete = files.slice(MAX_LOG_FILES);
-      filesToDelete.forEach(file => {
-        try {
-          fs.unlinkSync(file.path);
-          console.log(`[로그 정리] 오래된 로그 파일 삭제: ${file.name}`);
-        } catch (e) {
-          console.error(`[로그 정리] 파일 삭제 실패: ${file.name}`, e.message);
-        }
-      });
-    }
-  } catch (e) {
-    console.error(`[로그 정리] 오류:`, e.message);
-  }
-}
-
-// 로그 파일 스트림 생성
-const logFileName = getLogFileName();
-const logFilePath = path.join(LOG_DIR, logFileName);
-let logStream = null;
-
-try {
-  logStream = fs.createWriteStream(logFilePath, { flags: 'a', encoding: 'utf8' });
-  console.log(`[로그] 로그 파일 생성: ${logFileName}`);
-  console.log(`[로그] 로그 파일 경로: ${logFilePath}`);
-  console.log(`[로그] 최대 보관 파일 수: ${MAX_LOG_FILES}개`);
-  
-  // 시작 시 오래된 로그 정리
-  cleanupOldLogs();
-} catch (e) {
-  console.error(`[로그] 로그 파일 생성 실패:`, e.message);
-}
-
-// 로그 기록 함수 (콘솔 + 파일)
-function writeLog(level, ...args) {
-  const timestamp = new Date().toISOString();
-  const message = args.map(arg => {
-    if (typeof arg === 'object') {
-      try {
-        return JSON.stringify(arg, null, 2);
-      } catch (e) {
-        return String(arg);
-      }
-    }
-    return String(arg);
-  }).join(' ');
-  
-  const logLine = `[${timestamp}] [${level}] ${message}\n`;
-  
-  // 콘솔 출력 (원본 함수 사용하여 무한 루프 방지)
-  if (level === 'ERROR') {
-    originalError(...args);
-  } else {
-    originalLog(...args);
-  }
-  
-  // 파일 출력
-  if (logStream) {
-    try {
-      logStream.write(logLine);
-    } catch (e) {
-      // 파일 쓰기 실패해도 서버는 계속 동작 (원본 함수 사용)
-      originalError(`[로그] 파일 쓰기 실패:`, e.message);
-    }
-  }
-}
-
-// console.log, console.error 래핑
-const originalLog = console.log;
-const originalError = console.error;
-
-console.log = function(...args) {
-  writeLog('INFO', ...args);
-};
-
-console.error = function(...args) {
-  writeLog('ERROR', ...args);
-};
-
-// 종료 시 로그 스트림 닫기 (하단의 shutdown 함수에서 처리)
-process.on('exit', () => {
-  if (logStream) {
-    logStream.end();
-  }
-});
+// 로그 관리 모듈 초기화
+logManager.initialize();
 
 // WebSocket 서버를 전역 변수로 선언 (나중에 할당)
 let wss = null;
@@ -199,6 +149,12 @@ app.get('/admin', (req, res) => {
 
 // 관리자 API
 app.use('/api/admin', adminRouter);
+app.use('/bridge', bridgeRouter);
+app.use('/auth/naver', naverOAuthRouter);
+
+// DB 업로드 API
+const dbUploadRouter = require('./routes/dbUpload');
+app.use('/api', dbUploadRouter);
 
 // 네이버 OAuth API (선택적 로딩)
 try {
@@ -209,6 +165,18 @@ try {
     console.warn('[서버] 네이버 OAuth 라우터 로드 실패:', error.message);
     console.warn('[서버] OAuth 기능은 사용할 수 없습니다. server/api/naverOAuth.js 파일을 확인하세요.');
 }
+
+// 연동 직후 대기 질문 즉시 처리 (수동 트리거용)
+app.get('/api/naver-oauth/process-pending', async (req, res) => {
+    try {
+        const { processPendingSubmits } = require('./utils/cafeDraftManager');
+        await processPendingSubmits();
+        res.json({ ok: true, message: '처리 완료. 서버 로그에서 [백그라운드 재개] 확인하세요.' });
+    } catch (err) {
+        console.error('[api/naver-oauth/process-pending] 오류:', err.message);
+        res.status(500).json({ ok: false, error: err.message });
+    }
+});
 
 // ========== 네이버 카페 짧은 링크 리다이렉트 ==========
 app.get('/go/:code', async (req, res) => {
@@ -264,294 +232,9 @@ app.get('/', (req, res) => {
 });
 
 // ============================================
-// 카카오톡 메시지 복호화 로직 (Python 코드와 동일)
+// 카카오톡 메시지 복호화 로직 (모듈에서 import)
 // ============================================
-
-const KAKAO_IV = Buffer.from([15, 8, 1, 0, 25, 71, 37, 220, 21, 245, 23, 224, 225, 21, 12, 53]);
-const KAKAO_PASSWORD = Buffer.from([22, 8, 9, 111, 2, 23, 43, 8, 33, 33, 10, 16, 3, 3, 7, 6]);
-// kakaodecrypt.py의 KAKAO_PREFIXES와 동일하게 구성
-// 인덱스 31: incept(830819) = 'extr.ursra'
-// 인덱스 32: 'veil'
-const KAKAO_PREFIXES = [
-  '', '', '12', '24', '18', '30', '36', '12', '48', '7', '35', '40',
-  '17', '23', '29', 'isabel', 'kale', 'sulli', 'van', 'merry', 'kyle',
-  'james', 'maddux', 'tony', 'hayden', 'paul', 'elijah', 'dorothy',
-  'sally', 'bran', incept(830819), 'veil'
-];
-
-function incept(n) {
-  const dict1 = ['adrp.ldrsh.ldnp', 'ldpsw', 'umax', 'stnp.rsubhn', 'sqdmlsl', 'uqrshl.csel', 'sqshlu', 'umin.usubl.umlsl', 'cbnz.adds', 'tbnz',
-    'usubl2', 'stxr', 'sbfx', 'strh', 'stxrb.adcs', 'stxrh', 'ands.urhadd', 'subs', 'sbcs', 'fnmadd.ldxrb.saddl',
-    'stur', 'ldrsb', 'strb', 'prfm', 'ubfiz', 'ldrsw.madd.msub.sturb.ldursb', 'ldrb', 'b.eq', 'ldur.sbfiz', 'extr',
-    'fmadd', 'uqadd', 'sshr.uzp1.sttrb', 'umlsl2', 'rsubhn2.ldrh.uqsub', 'uqshl', 'uabd', 'ursra', 'usubw', 'uaddl2',
-    'b.gt', 'b.lt', 'sqshl', 'bics', 'smin.ubfx', 'smlsl2', 'uabdl2', 'zip2.ssubw2', 'ccmp', 'sqdmlal',
-    'b.al', 'smax.ldurh.uhsub', 'fcvtxn2', 'b.pl'];
-  const dict2 = ['saddl', 'urhadd', 'ubfiz.sqdmlsl.tbnz.stnp', 'smin', 'strh', 'ccmp', 'usubl', 'umlsl', 'uzp1', 'sbfx',
-    'b.eq', 'zip2.prfm.strb', 'msub', 'b.pl', 'csel', 'stxrh.ldxrb', 'uqrshl.ldrh', 'cbnz', 'ursra', 'sshr.ubfx.ldur.ldnp',
-    'fcvtxn2', 'usubl2', 'uaddl2', 'b.al', 'ssubw2', 'umax', 'b.lt', 'adrp.sturb', 'extr', 'uqshl',
-    'smax', 'uqsub.sqshlu', 'ands', 'madd', 'umin', 'b.gt', 'uabdl2', 'ldrsb.ldpsw.rsubhn', 'uqadd', 'sttrb',
-    'stxr', 'adds', 'rsubhn2.umlsl2', 'sbcs.fmadd', 'usubw', 'sqshl', 'stur.ldrsh.smlsl2', 'ldrsw', 'fnmadd', 'stxrb.sbfiz',
-    'adcs', 'bics.ldrb', 'l1ursb', 'subs.uhsub', 'ldurh', 'uabd', 'sqdmlal'];
-  const word1 = dict1[n % dict1.length];
-  const word2 = dict2[(n + 31) % dict2.length];
-  return word1 + '.' + word2;
-}
-
-function generateSalt(userId, encType) {
-  // Python 코드와 정확히 동일: gen_salt(user_id, enc)
-  // Python: s = (KAKAO_PREFIXES[enc] + str(user_id))[:16]
-  // Python: s = s + "\0" * (16 - len(s))
-  // Python: return s.encode("utf-8")
-  
-  const userIdStr = String(userId);
-  const encTypeNum = Number(encType);
-  
-  // Python: prefix = KAKAO_PREFIXES[enc]
-  const prefix = KAKAO_PREFIXES[encTypeNum] || '';
-  
-  // Python: s = (prefix + str(user_id))[:16]
-  let saltStr = (prefix + userIdStr).substring(0, 16);
-  
-  // Python: s = s + "\0" * (16 - len(s))
-  // Buffer.alloc(16, 0)로 이미 0으로 초기화되어 있음
-  const salt = Buffer.alloc(16, 0);
-  const saltBytes = Buffer.from(saltStr, 'utf-8');
-  const copyLen = Math.min(saltBytes.length, 16);
-  saltBytes.copy(salt, 0, 0, copyLen);
-  
-  return salt;
-}
-
-function pkcs16adjust(aArray, aOff, b) {
-  // aArray는 Buffer 또는 Uint8Array (직접 수정 가능)
-  // Python 코드와 동일: pkcs16adjust(I, j * v, B)
-  let x = (b[b.length - 1] & 0xff) + (aArray[aOff + b.length - 1] & 0xff) + 1;
-  aArray[aOff + b.length - 1] = x % 256;
-  x = x >> 8;
-  for (let i = b.length - 2; i >= 0; i--) {
-    x = x + (b[i] & 0xff) + (aArray[aOff + i] & 0xff);
-    aArray[aOff + i] = x % 256;
-    x = x >> 8;
-  }
-}
-
-function generateSecretKey(salt) {
-  // PKCS12 키 유도 방식 (PBEWITHSHAAND256BITAES-CBC-BC)
-  // Python 코드: password = (password + b'\0').decode('ascii').encode('utf-16-be')
-  // Python의 .decode('ascii')는 각 바이트를 ASCII 문자로 변환
-  // Python의 .encode('utf-16-be')는 각 문자를 2바이트(Big Endian)로 변환
-  const password = Buffer.from(KAKAO_PASSWORD);
-  // password + null byte
-  const passwordWithNull = Buffer.concat([password, Buffer.from([0])]);
-  
-  // Python: (password + b'\0').decode('ascii').encode('utf-16-be')
-  // 각 바이트를 ASCII 문자로 디코딩한 후 UTF-16-BE로 인코딩
-  // ASCII 범위(0-127)의 바이트는 UTF-16-BE로 인코딩할 때 High byte=0, Low byte=원본 값
-  const passwordUtf16be = Buffer.alloc(passwordWithNull.length * 2);
-  for (let i = 0; i < passwordWithNull.length; i++) {
-    const byte = passwordWithNull[i];
-    // UTF-16-BE: High byte = 0, Low byte = 원본 바이트 값
-    passwordUtf16be[i * 2] = 0;           // High byte (항상 0, ASCII는 0-127)
-    passwordUtf16be[i * 2 + 1] = byte;     // Low byte (원본 바이트 값)
-  }
-  
-  const hasher = crypto.createHash('sha1');
-  const v = 64; // SHA1 block size
-  const u = 20; // SHA1 digest size
-  
-  const D = Buffer.alloc(v, 1);
-  // Python 코드와 정확히 동일: math.ceil(len(salt) / v)
-  const saltLen = Math.ceil(salt.length / v);
-  const S = Buffer.alloc(v * saltLen);
-  for (let i = 0; i < S.length; i++) {
-    S[i] = salt[i % salt.length];
-  }
-  
-  // Python 코드와 정확히 동일: math.ceil(len(password) / v)
-  const passLen = Math.ceil(passwordUtf16be.length / v);
-  const P = Buffer.alloc(v * passLen);
-  for (let i = 0; i < P.length; i++) {
-    P[i] = passwordUtf16be[i % passwordUtf16be.length];
-  }
-  
-  const I = Buffer.concat([S, P]);
-  const B = Buffer.alloc(v);
-  const dkeySize = 32;
-  const c = Math.ceil((dkeySize + u - 1) / u);
-  const dKey = Buffer.alloc(dkeySize);
-  
-  for (let i = 1; i <= c; i++) {
-    const hash1 = crypto.createHash('sha1');
-    hash1.update(D);
-    hash1.update(I);
-    let A = Buffer.from(hash1.digest());
-    
-    // kakaodecrypt.py와 동일: for _ in range(1, iterations) - iterations=2일 때 1번 반복
-    // Python: range(1, 2)는 [1]만 생성하므로 1번 반복
-    // JavaScript: for (let j = 1; j < 2; j++) - j=1만 실행 (1번 반복)
-    for (let j = 1; j < 2; j++) { // iterations = 2일 때 1번 반복
-      const hash2 = crypto.createHash('sha1');
-      hash2.update(A);
-      A = Buffer.from(hash2.digest());
-    }
-    
-    for (let j = 0; j < B.length; j++) {
-      B[j] = A[j % A.length];
-    }
-    
-    // Python 코드와 동일: I를 직접 수정
-    // Buffer는 Uint8Array의 서브클래스이므로 직접 수정 가능
-    for (let j = 0; j < Math.floor(I.length / v); j++) {
-      pkcs16adjust(I, j * v, B);
-    }
-    
-    // kakaodecrypt.py와 동일한 로직
-    const start = (i - 1) * u;
-    const remaining = dkeySize - start;
-    if (remaining > 0) {
-      // kakaodecrypt.py: write_len = min(remaining, len(A))
-      const writeLen = Math.min(remaining, A.length);
-      // kakaodecrypt.py: dKey[start:start + write_len] = A[:write_len]
-      A.copy(dKey, start, 0, writeLen);
-    }
-  }
-  
-  return dKey;
-}
-
-function decryptKakaoTalkMessage(encryptedText, userId, encType = 31) {
-  try {
-    if (!encryptedText || encryptedText === '{}' || encryptedText === '[]') {
-      return encryptedText;
-    }
-    
-    // userId를 문자열로 변환 (큰 정수 정밀도 손실 방지)
-    const userIdStr = String(userId);
-    // encType을 숫자로 변환
-    const encTypeNum = Number(encType);
-    
-    const salt = generateSalt(userIdStr, encTypeNum);
-    console.log(`[복호화] Salt 생성: userId=${userId}, encType=${encType}, salt hex=${salt.toString('hex').substring(0, 32)}`);
-    
-    const secretKey = generateSecretKey(salt);
-    console.log(`[복호화] SecretKey 생성: key hex=${secretKey.toString('hex').substring(0, 32)}`);
-    
-    // kakaodecrypt.py와 동일: base64 디코딩
-    let decoded;
-    try {
-      decoded = Buffer.from(encryptedText, 'base64');
-    } catch (e) {
-      // base64 디코딩 실패 시 null 반환 (kakaodecrypt.py와 동일)
-      console.log(`[복호화] Base64 디코딩 실패: ${e.message}`);
-      return null;
-    }
-    
-    console.log(`[복호화] Base64 디코딩: 암호문 길이=${decoded.length}`);
-    
-    // kakaodecrypt.py: if len(ct) == 0 or len(ct) % 16 != 0: return None
-    if (decoded.length === 0 || decoded.length % 16 !== 0) {
-      console.log(`[복호화] 실패: 암호문 길이가 0이거나 16의 배수가 아님: ${decoded.length}`);
-      return null;
-    }
-    
-    const decipher = crypto.createDecipheriv('aes-256-cbc', secretKey, KAKAO_IV);
-    decipher.setAutoPadding(false);
-    
-    // Iris 방식: cipher.doFinal() with BadPaddingException handling
-    let padded;
-    try {
-      padded = Buffer.concat([decipher.update(decoded), decipher.final()]);
-      console.log(`[복호화] AES 복호화 완료: padded 길이=${padded.length}`);
-    } catch (e) {
-      // Iris 코드: BadPaddingException catch 후 원본 반환
-      console.log(`[복호화] BadPaddingException 또는 복호화 오류: ${e.message}`);
-      console.log(`[복호화] 잘못된 키 또는 데이터일 수 있습니다. 원본 ciphertext 반환`);
-      return encryptedText;
-    }
-    
-    // PKCS5Padding 제거 (제공된 코드 방식: padded[:-padded[-1]])
-    let plaintext;
-    try {
-      if (padded.length === 0) {
-        console.log(`[복호화] 경고: 복호화된 데이터가 비어있음`);
-        return null;
-      }
-      
-      // Iris 방식: 마지막 바이트를 패딩 길이로 사용
-      // Iris 코드: val paddingLength = padded[padded.size - 1].toInt()
-      // Kotlin의 toInt()는 signed integer로 변환하지만, 바이트 값은 unsigned로 처리됨
-      // JavaScript에서는 바이트 값이 이미 0-255 범위이므로 & 0xff는 불필요하지만 명시적으로 사용
-      const lastByte = padded[padded.length - 1];
-      const paddingLength = lastByte & 0xff;  // unsigned로 변환 (0-255)
-      console.log(`[복호화] 패딩 확인: padded 길이=${padded.length}, 마지막 바이트=${lastByte}, paddingLength=${paddingLength}`);
-      
-      // Iris 방식: require(!(paddingLength <= 0 || paddingLength > cipher.blockSize))
-      // cipher.blockSize = 16 (AES 블록 크기)
-      // Iris는 require() 실패 시 예외 발생하지만, 여기서는 복호화 실패로 간주
-      if (paddingLength <= 0 || paddingLength > 16) {
-        console.log(`[복호화] 실패: 잘못된 패딩 길이 (${paddingLength}), 복호화 키가 잘못되었을 수 있습니다`);
-        console.log(`[복호화] 디버그: padded 마지막 바이트=${lastByte}, paddingLength=${paddingLength}, padded 길이=${padded.length}`);
-        return null;
-      }
-      
-      if (paddingLength > padded.length) {
-        console.log(`[복호화] 실패: 패딩 길이(${paddingLength})가 데이터 길이(${padded.length})보다 큼`);
-        return null;
-      }
-      
-      // Iris 방식: plaintextBytes = ByteArray(padded.size - paddingLength)
-      // Iris는 패딩 바이트 검증을 하지 않고, 패딩 길이만 체크합니다
-      plaintext = padded.slice(0, padded.length - paddingLength);
-      console.log(`[복호화] PKCS5 패딩 제거: paddingLength=${paddingLength}, plaintext 길이=${plaintext.length}`);
-      
-      // 패딩 제거 후 길이가 0이면 실패로 간주
-      if (plaintext.length === 0) {
-        console.log(`[복호화] 실패: 패딩 제거 후 길이가 0`);
-        return null;
-      }
-    } catch (e) {
-      // IndexError: 패딩 제거 실패
-      console.log(`[복호화] 패딩 제거 실패: ${e.message}, 원본 데이터 사용`);
-      plaintext = padded;
-    }
-    
-    if (plaintext.length === 0) {
-      console.log(`[복호화] 경고: plaintext가 비어있음`);
-      return null;
-    }
-    
-    // UTF-8 디코딩 (Iris 방식: String(plaintextBytes, StandardCharsets.UTF_8))
-    try {
-      const result = plaintext.toString('utf-8');
-      
-      // 복호화된 메시지가 유효한 텍스트인지 확인
-      if (result && result.length > 0) {
-        // 제어 문자나 깨진 문자 확인 (Iris는 체크하지 않지만, 안전을 위해 추가)
-        const hasControlChars = /[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(result);
-        if (hasControlChars) {
-          console.log(`[복호화] 경고: 제어 문자 포함, 바이너리 데이터일 수 있음`);
-          // 제어 문자가 많으면 복호화 실패로 간주
-          const controlCharCount = (result.match(/[\x00-\x08\x0B-\x0C\x0E-\x1F]/g) || []).length;
-          if (controlCharCount > result.length * 0.1) {  // 10% 이상이면 실패
-            console.log(`[복호화] 실패: 제어 문자 비율이 너무 높음 (${controlCharCount}/${result.length})`);
-            return null;
-          }
-        }
-        console.log(`[복호화] UTF-8 디코딩 성공: "${result.substring(0, 50)}${result.length > 50 ? '...' : ''}"`);
-        return result;
-      }
-      return null;
-    } catch (e) {
-      // Iris는 UTF-8 디코딩 실패 시 예외를 발생시키지만, 여기서는 null 반환
-      console.log(`[복호화] UTF-8 디코딩 실패: ${e.message}`);
-      return null;
-    }
-  } catch (e) {
-    console.log(`[복호화] 예외 발생: ${e.message}`);
-    console.error(e);
-    return null;
-  }
-}
+// decryptKakaoTalkMessage는 위에서 이미 import됨
 
 // 메시지 복호화 엔드포인트 (Iris 호환)
 app.post('/decrypt', (req, res) => {
@@ -671,7 +354,7 @@ app.post('/sync/upload', (req, res) => {
     // 파일 저장
     fs.writeFileSync(filePath, contentString, 'utf8');
     
-    const serverUrl = process.env.SERVER_URL || 'http://211.218.42.222:5002';
+    const serverUrl = process.env.SERVER_URL || 'http://192.168.0.15:5002';
     const downloadUrl = `${serverUrl}/sync/file/${filename}`;
     
     res.json({
@@ -1028,8 +711,21 @@ setSendFollowUpMessageFunction((roomKey, message) => {
 // labbot-node.js에 함수 전달
 const { setSendShortUrlMessage, setSendFollowUpMessage } = require('./labbot-node');
 
+// 전역으로 sendFollowUpMessageFunction 등록 (naverOAuth.js에서 사용)
+global.sendFollowUpMessageFunction = sendFollowUpMessageFunction;
+
 // 백필 작업 주기적 실행 (5분마다)
+// 반응 카운트 pending 큐 재처리 (5분마다)
 if (typeof setInterval !== 'undefined') {
+    setInterval(async () => {
+        try {
+            const chatLogger = require('./db/chatLogger');
+            await chatLogger.processReactionCountPending();
+        } catch (err) {
+            console.error('[반응 pending] 재처리 오류:', err.message);
+        }
+    }, 5 * 60 * 1000);  // 5분마다
+    
     setInterval(async () => {
         try {
             const chatLogger = require('./db/chatLogger');
@@ -1040,6 +736,28 @@ if (typeof setInterval !== 'undefined') {
     }, 5 * 60 * 1000);  // 5분마다 실행
     
     console.log('[백필] 주기적 백필 작업 시작 (5분마다)');
+    
+    // 만료된 Draft 정리 (1시간마다)
+    setInterval(async () => {
+        try {
+            const { cleanupExpiredDrafts } = require('./utils/cafeDraftManager');
+            await cleanupExpiredDrafts();
+        } catch (err) {
+            console.error('[Draft] 정리 오류:', err.message);
+        }
+    }, 60 * 60 * 1000);  // 1시간마다
+
+    // OAuth 연동 직후 대기 질문 자동 등록 (pending_oauth/pending_submit → 카페 게시)
+    const runPendingSubmits = async () => {
+        try {
+            const { processPendingSubmits } = require('./utils/cafeDraftManager');
+            await processPendingSubmits();
+        } catch (err) {
+            console.error('[Draft] pending 재개 오류:', err.message);
+        }
+    };
+    setTimeout(runPendingSubmits, 5 * 1000);   // 5초 후 첫 실행
+    setInterval(runPendingSubmits, 30 * 1000); // 30초마다
 }
 setSendShortUrlMessage(sendShortUrlMessageFunction);
 setSendFollowUpMessage(sendFollowUpMessageFunction);
@@ -1105,9 +823,57 @@ wss.on('connection', function connection(ws, req) {
 
   ws.on('message', async function message(data) {
     // === RAW MESSAGE FROM CLIENT ===
-    console.log("=== RAW MESSAGE FROM CLIENT ===");
-    console.log(data.toString());
-    console.log("================================");
+    const timestamp = new Date().toISOString();
+    let messageId = 'N/A';
+    let messageType = 'unknown';
+    
+    try {
+      const parsed = JSON.parse(data.toString());
+      messageId = parsed.json?._id || parsed.json?.kakao_log_id || parsed._id || 'N/A';
+      messageType = parsed.type || 'unknown';
+    } catch (e) {
+      // 파싱 실패는 무시
+    }
+    
+    console.log(`[${timestamp}] === RAW MESSAGE FROM CLIENT ===`);
+    console.log(`[${timestamp}] 메시지 ID: ${messageId}, 타입: ${messageType}`);
+    console.log(`[${timestamp}] 메시지 길이: ${data.toString().length} bytes`);
+    console.log(data.toString().substring(0, 500) + (data.toString().length > 500 ? '...' : ''));
+    console.log(`[${timestamp}] ================================`);
+    
+    // 클라이언트 로그 수신 처리
+    try {
+      const json = JSON.parse(data.toString());
+      if (json.type === 'client_logs' && Array.isArray(json.logs)) {
+        // 클라이언트 로그를 logs 폴더에 통합 저장
+        const fs = require('fs');
+        const path = require('path');
+        const LOG_DIR = path.join(__dirname, 'logs');
+        const CLIENT_LOG_FILE = path.join(LOG_DIR, 'client.log');
+        
+        // 로그 디렉토리 확인
+        if (!fs.existsSync(LOG_DIR)) {
+          fs.mkdirSync(LOG_DIR, { recursive: true });
+        }
+        
+        // 클라이언트 로그를 파일에 추가
+        const logLines = json.logs.map(log => `[CLIENT] ${log}`).join('\n') + '\n';
+        fs.appendFileSync(CLIENT_LOG_FILE, logLines, 'utf8');
+        
+        // 클라이언트 로그도 최신 100줄만 유지
+        const fileContent = fs.readFileSync(CLIENT_LOG_FILE, 'utf8');
+        const lines = fileContent.split('\n').filter(line => line.trim() !== '');
+        if (lines.length > 100) {
+          const trimmedLines = lines.slice(-100);
+          fs.writeFileSync(CLIENT_LOG_FILE, trimmedLines.join('\n') + '\n', 'utf8');
+        }
+        
+        console.log(`[클라이언트 로그] ${json.logs.length}줄 수신 및 저장 완료`);
+        return; // 클라이언트 로그는 여기서 처리 종료
+      }
+    } catch (e) {
+      // JSON 파싱 실패는 무시 (일반 메시지일 수 있음)
+    }
     
     try {
       let messageData;
@@ -1251,8 +1017,10 @@ wss.on('connection', function connection(ws, req) {
         }
       }
       
-      // 반응(reaction) 메시지 처리
-      if (messageData.type === 'reaction' || messageData.type === 'like') {
+      // 반응(reaction) 메시지 처리 (type: 'reaction' 또는 'reaction_update')
+      if (messageData.type === 'reaction' || messageData.type === 'reaction_update' || messageData.type === 'like') {
+        console.log(`[반응 처리] 반응 메시지 수신: type=${messageData.type}`);
+        
         // room, sender 변수가 이미 선언되었을 수 있으므로 재선언하지 않고 재할당만 수행
         if (typeof room === 'undefined') {
           var room = messageData.room;
@@ -1265,6 +1033,608 @@ wss.on('connection', function connection(ws, req) {
           sender = messageData.sender;
         }
         const json = messageData.json;
+        console.log(`[반응 처리] json keys: ${json ? Object.keys(json).join(', ') : 'null'}, sender="${sender}", room="${room}"`);
+        
+        // reaction_count_update 타입 처리 (경량 버전: 카운트만 저장)
+        if (messageData.type === 'reaction_count_update') {
+          console.log(`[반응 카운트] ========== 반응 카운트 업데이트 수신 ==========`);
+          console.log(`[반응 카운트] [1단계] 이벤트 수신: type=${messageData.type}, room="${room}", sender="${sender}"`);
+          
+          try {
+            const chatLogger = require('./db/chatLogger');
+            const db = require('./db/database');
+            
+            // 데이터 추출
+            const kakaoLogId = json?.kakao_log_id || json?.target_message_id || null;
+            const chatId = json?.chat_id || null;
+            const roomName = json?.room_name || room || '';
+            const oldCount = json?.old_count || 0;
+            const newCount = json?.new_count || 0;
+            const observedAt = json?.observed_at || new Date().toISOString();
+            
+            console.log(`[반응 카운트] [2단계] 데이터 추출:`);
+            console.log(`  - kakao_log_id: ${kakaoLogId} (type: ${typeof kakaoLogId})`);
+            console.log(`  - chat_id: ${chatId}`);
+            console.log(`  - room_name: ${roomName}`);
+            console.log(`  - old_count: ${oldCount} -> new_count: ${newCount}`);
+            
+            // 메시지 ID 변환 (chat_id 기반 우선)
+            console.log(`[반응 카운트] [3단계] 메시지 ID 변환 시작`);
+            let actualMessageId = null;
+            
+            if (kakaoLogId) {
+              try {
+                const logIdStr = String(kakaoLogId).trim();
+                
+                if (logIdStr && /^\d+$/.test(logIdStr)) {
+                  // chat_id 기반 매핑 (우선순위 1)
+                  if (chatId) {
+                    console.log(`[반응 카운트] [3-1] chat_id 기반 조회: kakao_log_id="${logIdStr}", chat_id=${chatId}`);
+                    
+                    // metadata에서 chat_id 확인 또는 직접 조회
+                    const { data: messagesByLogId, error: queryError } = await db.supabase
+                      .from('chat_messages')
+                      .select('id, metadata')
+                      .eq('kakao_log_id', logIdStr);
+                    
+                    if (queryError) {
+                      console.error(`[반응 카운트] [3-1] DB 조회 오류:`, queryError);
+                    } else if (messagesByLogId && messagesByLogId.length > 0) {
+                      // chat_id가 metadata에 있는 경우 필터링
+                      let targetMessage = null;
+                      for (const msg of messagesByLogId) {
+                        const msgChatId = msg.metadata?.chat_id || msg.metadata?._chat_id;
+                        if (msgChatId && String(msgChatId) === String(chatId)) {
+                          targetMessage = msg;
+                          break;
+                        }
+                      }
+                      
+                      // chat_id 매칭 실패 시 첫 번째 메시지 사용 (하위 호환)
+                      if (!targetMessage && messagesByLogId.length === 1) {
+                        targetMessage = messagesByLogId[0];
+                        console.log(`[반응 카운트] [3-1] ⚠️ chat_id 매칭 실패, 단일 메시지 사용`);
+                      }
+                      
+                      if (targetMessage && targetMessage.id) {
+                        actualMessageId = String(targetMessage.id);
+                        console.log(`[반응 카운트] [3-1] ✅ 메시지 찾음: kakao_log_id="${logIdStr}", chat_id=${chatId} -> DB id=${actualMessageId}`);
+                      }
+                    }
+                  }
+                  
+                  // chat_id 기반 매핑 실패 시 room_name 기반 (하위 호환)
+                  if (!actualMessageId) {
+                    console.log(`[반응 카운트] [3-2] room_name 기반 조회 (fallback): kakao_log_id="${logIdStr}", room_name="${roomName}"`);
+                    
+                    const { data: messageByLogId, error: queryError } = await db.supabase
+                      .from('chat_messages')
+                      .select('id')
+                      .eq('kakao_log_id', logIdStr)
+                      .eq('room_name', roomName || '')
+                      .maybeSingle();
+                    
+                    if (queryError) {
+                      console.error(`[반응 카운트] [3-2] DB 조회 오류:`, queryError);
+                    } else if (messageByLogId && messageByLogId.id) {
+                      actualMessageId = String(messageByLogId.id);
+                      console.log(`[반응 카운트] [3-2] ✅ 메시지 찾음 (room_name): kakao_log_id="${logIdStr}" -> DB id=${actualMessageId}`);
+                    }
+                  }
+                }
+              } catch (err) {
+                console.error('[반응 카운트] [3단계] 메시지 찾기 실패:', err.message);
+              }
+            }
+            
+            if (actualMessageId) {
+              // 메시지 찾음: 스냅샷 저장
+              console.log(`[반응 카운트] [4단계] 스냅샷 저장 시작: messageId=${actualMessageId}, count=${newCount}`);
+              
+              try {
+                // chat_reaction_counts에 upsert
+                const { data: summaryData, error: summaryError } = await db.supabase
+                  .from('chat_reaction_counts')
+                  .upsert({
+                    message_id: actualMessageId,
+                    kakao_log_id: BigInt(kakaoLogId) || null,
+                    chat_id: chatId || null,
+                    room_name: roomName,
+                    reaction_count: newCount,
+                    last_observed_at: observedAt,
+                    updated_at: new Date().toISOString()
+                  }, {
+                    onConflict: 'message_id'
+                  })
+                  .select()
+                  .single();
+                
+                if (summaryError) {
+                  console.error(`[반응 카운트] [4단계] ❌ 스냅샷 저장 실패:`, summaryError);
+                } else {
+                  console.log(`[반응 카운트] [4단계] ✅ 스냅샷 저장 성공: id=${summaryData.id}`);
+                  
+                  // delta 저장 (선택)
+                  if (oldCount !== newCount) {
+                    const { error: deltaError } = await db.supabase
+                      .from('chat_reaction_deltas')
+                      .insert({
+                        message_id: actualMessageId,
+                        delta: newCount - oldCount,
+                        old_count: oldCount,
+                        new_count: newCount,
+                        observed_at: observedAt
+                      });
+                    
+                    if (deltaError) {
+                      console.error(`[반응 카운트] [4-1] ❌ delta 저장 실패:`, deltaError);
+                    } else {
+                      console.log(`[반응 카운트] [4-1] ✅ delta 저장 성공`);
+                    }
+                  }
+                }
+              } catch (err) {
+                console.error(`[반응 카운트] [4단계] 예외:`, err.message);
+              }
+            } else {
+              // 메시지 찾기 실패: pending 큐에 적재
+              console.log(`[반응 카운트] [5단계] 메시지 매핑 실패, pending 큐에 적재`);
+              
+              try {
+                const { error: pendingError } = await db.supabase
+                  .from('reaction_count_pending')
+                  .insert({
+                    chat_id: chatId || null,
+                    kakao_log_id: BigInt(kakaoLogId) || null,
+                    new_count: newCount,
+                    room_name: roomName,
+                    observed_at: observedAt
+                  });
+                
+                if (pendingError) {
+                  console.error(`[반응 카운트] [5단계] ❌ pending 적재 실패:`, pendingError);
+                } else {
+                  console.log(`[반응 카운트] [5단계] ✅ pending 적재 성공`);
+                }
+              } catch (err) {
+                console.error(`[반응 카운트] [5단계] 예외:`, err.message);
+              }
+            }
+          } catch (err) {
+            console.error('[반응 카운트] 처리 중 오류:', err.message);
+            console.error('[반응 카운트] 스택 트레이스:', err.stack);
+          }
+          
+          return; // 처리 완료
+        }
+        
+        // reaction_update 타입은 별도 처리 (v.defaultEmoticonsCount 기반) - 하위 호환
+        if (messageData.type === 'reaction_update') {
+          console.log(`[반응 업데이트] ========== 반응 이벤트 수신 시작 ==========`);
+          console.log(`[반응 업데이트] [1단계] 이벤트 수신: type=${messageData.type}, room="${room}", sender="${sender}"`);
+          
+          try {
+            const chatLogger = require('./db/chatLogger');
+            const moderationLogger = require('./db/moderationLogger');
+            const { extractSenderName, extractSenderId } = require('./labbot-node');
+            const db = require('./db/database');
+            
+            // 데이터 추출
+            const targetMessageId = json?.target_message_id || json?.message_id || null;
+            const oldCount = json?.old_count || 0;
+            const newCount = json?.new_count || json?.reaction_count || 0;
+            const eventType = messageData.event_type || 'reaction_updated';
+            let newReactions = json?.new_reactions || [];
+            const removedReactions = json?.removed_reactions || [];
+            let allReactions = json?.all_reactions || [];
+            const supplement = json?.supplement || null;
+            
+            // ⚠️ 개선: reaction_update 수신 진입 로그 강화
+            console.log(`[반응 업데이트] ⚠️⚠️⚠️ 서버 수신 진입: room="${room}", targetMessageId=${targetMessageId}, newReactions.length=${newReactions.length}, allReactions.length=${allReactions.length}, supplement=${supplement ? '있음' : '없음'}, newCount=${newCount}, oldCount=${oldCount}`);
+            console.log(`[반응 업데이트] [1-1] 진입 확인: room="${room}", targetMessageId=${targetMessageId}, newReactions.length=${newReactions.length}, allReactions.length=${allReactions.length}, supplement=${supplement ? '있음' : '없음'}, newCount=${newCount}, oldCount=${oldCount}`);
+            
+            // ⚠️ 중요: supplement에서 allReactions 추출 시도 (클라이언트에서 전송하지 않은 경우)
+            if ((!newReactions || newReactions.length === 0) && (!allReactions || allReactions.length === 0) && supplement) {
+              try {
+                const supplementObj = typeof supplement === 'string' ? JSON.parse(supplement) : supplement;
+                console.log(`[반응 업데이트] [2-1] supplement 파싱 시도:`, JSON.stringify(supplementObj).substring(0, 200));
+                
+                if (supplementObj && typeof supplementObj === 'object') {
+                  // 다양한 필드명 시도
+                  const reactionsFromSupplement = 
+                    (Array.isArray(supplementObj.reactions) ? supplementObj.reactions : null) ||
+                    (Array.isArray(supplementObj.all_reactions) ? supplementObj.all_reactions : null) ||
+                    (Array.isArray(supplementObj.emoticons) ? supplementObj.emoticons : null) ||
+                    (Array.isArray(supplementObj.reactions?.all) ? supplementObj.reactions.all : null) ||
+                    (Array.isArray(supplementObj.reactions?.list) ? supplementObj.reactions.list : null) ||
+                    (Array.isArray(supplementObj.list) ? supplementObj.list : null) ||
+                    [];
+                  
+                  if (reactionsFromSupplement.length > 0) {
+                    allReactions = reactionsFromSupplement;
+                    console.log(`[반응 업데이트] [2-1] ✅ supplement에서 allReactions 추출: ${allReactions.length}개`);
+                  } else {
+                    console.log(`[반응 업데이트] [2-1] ⚠️ supplement에 반응 정보 없음`);
+                  }
+                }
+              } catch (err) {
+                console.error(`[반응 업데이트] [2-1] supplement 파싱 오류:`, err.message);
+                console.error(`[반응 업데이트] [2-1] supplement 원본:`, typeof supplement === 'string' ? supplement.substring(0, 200) : JSON.stringify(supplement).substring(0, 200));
+              }
+            }
+            
+            // ⚠️ 추가: newReactions가 비어있고 allReactions도 비어있으면 로그 출력
+            if (newReactions.length === 0 && allReactions.length === 0 && newCount > 0) {
+              console.warn(`[반응 업데이트] [2-2] ⚠️ 반응 개수는 ${newCount}개인데 newReactions와 allReactions가 모두 비어있음`);
+              console.warn(`[반응 업데이트] [2-2] json 전체:`, JSON.stringify(json).substring(0, 500));
+            }
+            
+            console.log(`[반응 업데이트] [2단계] 데이터 추출 완료:`);
+            console.log(`  - event_type: ${eventType}`);
+            console.log(`  - targetMessageId: ${targetMessageId}`);
+            console.log(`  - old_count: ${oldCount} -> new_count: ${newCount}`);
+            console.log(`  - new_reactions: ${newReactions.length}개`);
+            console.log(`  - removed_reactions: ${removedReactions.length}개`);
+            console.log(`  - all_reactions: ${allReactions.length}개`);
+            console.log(`  - supplement: ${supplement ? '있음' : '없음'}`);
+            
+            // DB에서 실제 message id 찾기
+            // ⚠️ 중요: kakao_log_id는 문자열로 처리 (64-bit 정밀도 보존)
+            const chatId = json?.chat_id || null;
+            console.log(`[반응 업데이트] [3단계] 메시지 ID 변환 시작: targetMessageId=${targetMessageId} (type: ${typeof targetMessageId}), chat_id=${chatId}, room="${room}"`);
+            let actualMessageId = null;
+            if (targetMessageId) {
+              try {
+                // 문자열로 변환 (숫자 변환 금지 - 정밀도 손실 방지)
+                const logIdStr = String(targetMessageId).trim();
+                console.log(`[반응 업데이트] [3-1] kakao_log_id 문자열: "${logIdStr}"`);
+                
+                if (logIdStr && /^\d+$/.test(logIdStr)) {
+                  // chat_id 기반 매핑 (우선순위 1)
+                  if (chatId) {
+                    console.log(`[반응 업데이트] [3-2] chat_id 기반 조회: kakao_log_id="${logIdStr}", chat_id=${chatId}`);
+                    
+                    // metadata에서 chat_id 확인 또는 직접 chat_id 컬럼 사용
+                    // 우선 kakao_log_id와 room_name으로 조회 시도
+                    let query = db.supabase
+                      .from('chat_messages')
+                      .select('id, metadata')
+                      .eq('kakao_log_id', logIdStr);
+                    
+                    // chat_id가 metadata에 저장되어 있다면 필터링
+                    // 일단 kakao_log_id만으로 조회 후 chat_id 확인
+                    const { data: messagesByLogId, error: queryError } = await query;
+                    
+                    if (queryError) {
+                      console.error(`[반응 업데이트] [3-3] DB 조회 오류:`, queryError);
+                    } else if (messagesByLogId && messagesByLogId.length > 0) {
+                      // chat_id가 metadata에 있는 경우 필터링
+                      let targetMessage = null;
+                      for (const msg of messagesByLogId) {
+                        const msgChatId = msg.metadata?.chat_id || msg.metadata?._chat_id;
+                        if (msgChatId && String(msgChatId) === String(chatId)) {
+                          targetMessage = msg;
+                          break;
+                        }
+                      }
+                      
+                      // chat_id 매칭 실패 시 첫 번째 메시지 사용 (하위 호환)
+                      if (!targetMessage && messagesByLogId.length === 1) {
+                        targetMessage = messagesByLogId[0];
+                        console.log(`[반응 업데이트] [3-3] ⚠️ chat_id 매칭 실패, 단일 메시지 사용`);
+                      }
+                      
+                      if (targetMessage && targetMessage.id) {
+                        actualMessageId = String(targetMessage.id);
+                        console.log(`[반응 업데이트] [3-3] ✅ 메시지 찾음: kakao_log_id="${logIdStr}", chat_id=${chatId} -> DB id=${actualMessageId}`);
+                      } else {
+                        console.warn(`[반응 업데이트] [3-3] ⚠️ 메시지 없음: kakao_log_id="${logIdStr}", chat_id=${chatId}`);
+                      }
+                    } else {
+                      console.warn(`[반응 업데이트] [3-3] ⚠️ 메시지 없음: kakao_log_id="${logIdStr}"`);
+                    }
+                  } else {
+                    // chat_id가 없으면 room_name 기반 조회 (하위 호환)
+                    console.log(`[반응 업데이트] [3-2] room_name 기반 조회 (chat_id 없음): kakao_log_id="${logIdStr}", room_name="${room}"`);
+                    
+                    const { data: messageByLogId, error: queryError } = await db.supabase
+                      .from('chat_messages')
+                      .select('id')
+                      .eq('kakao_log_id', logIdStr)
+                      .eq('room_name', room || '')
+                      .maybeSingle();
+                    
+                    if (queryError) {
+                      console.error(`[반응 업데이트] [3-3] DB 조회 오류:`, queryError);
+                    } else if (messageByLogId && messageByLogId.id) {
+                      actualMessageId = String(messageByLogId.id);
+                      console.log(`[반응 업데이트] [3-3] ✅ 메시지 찾음 (room_name): kakao_log_id="${logIdStr}" -> DB id=${actualMessageId}`);
+                    } else {
+                      console.warn(`[반응 업데이트] [3-3] ⚠️ 메시지 없음: kakao_log_id="${logIdStr}", room="${room}"`);
+                    }
+                  }
+                } else {
+                  console.warn(`[반응 업데이트] [3-1] ⚠️ 유효하지 않은 형식: "${logIdStr}"`);
+                }
+              } catch (err) {
+                console.error('[반응 업데이트] [3단계] 메시지 찾기 실패:', err.message);
+                console.error('[반응 업데이트] [3단계] 스택 트레이스:', err.stack);
+              }
+            } else {
+              console.warn(`[반응 업데이트] [3단계] ⚠️ targetMessageId가 없음`);
+            }
+            
+            if (!actualMessageId) {
+              console.error(`[반응 업데이트] [3단계] ❌ 메시지를 찾을 수 없음: targetMessageId=${targetMessageId}, room="${room}"`);
+              console.error(`[반응 업데이트] [3단계] ❌ 처리 중단 (메시지가 없으면 반응 저장 불가)`);
+              return; // 메시지를 찾을 수 없으면 처리 불가
+            }
+            
+            console.log(`[반응 업데이트] [3단계] ✅ 메시지 ID 변환 완료: actualMessageId=${actualMessageId}`);
+            
+            const { CONFIG } = require('./labbot-node');
+            
+            // 1. 새로 추가된 반응 저장
+            // ⚠️ 중요: newReactions가 비어있으면 allReactions 사용 (첫 실행 또는 전체 동기화)
+            const reactionsToProcess = (Array.isArray(newReactions) && newReactions.length > 0) 
+              ? newReactions 
+              : (Array.isArray(allReactions) && allReactions.length > 0) 
+                ? allReactions 
+                : [];
+            
+            console.log(`[반응 업데이트] [4단계] 반응 저장 시작: newReactions=${newReactions.length}개, allReactions=${allReactions.length}개, 처리할 반응=${reactionsToProcess.length}개`);
+            
+            if (reactionsToProcess.length > 0) {
+              for (let i = 0; i < reactionsToProcess.length; i++) {
+                const reactionDetail = reactionsToProcess[i];
+                console.log(`[반응 업데이트] [4-${i+1}] 반응 ${i+1}/${reactionsToProcess.length} 처리 시작:`, JSON.stringify(reactionDetail));
+                
+                const reactionTypeDetail = reactionDetail.type || reactionDetail.emoType || reactionDetail.reaction || 'thumbs_up';
+                const reactorId = reactionDetail.userId || reactionDetail.user_id || null;
+                
+                console.log(`[반응 업데이트] [4-${i+1}-1] 반응 정보 추출: type=${reactionTypeDetail}, reactorId=${reactorId}`);
+                
+                // reactorId로 반응자 이름 조회 시도
+                let reactorName = null;
+                if (reactorId) {
+                  try {
+                    console.log(`[반응 업데이트] [4-${i+1}-2] 반응자 이름 조회 시작: reactorId=${reactorId}`);
+                    const { data: userData, error: userQueryError } = await db.supabase
+                      .from('chat_messages')
+                      .select('sender_name')
+                      .eq('sender_id', String(reactorId))
+                      .order('created_at', { ascending: false })
+                      .limit(1)
+                      .maybeSingle();
+                    
+                    if (userQueryError) {
+                      console.warn(`[반응 업데이트] [4-${i+1}-2] 반응자 이름 조회 오류:`, userQueryError);
+                    } else if (userData && userData.sender_name) {
+                      reactorName = userData.sender_name;
+                      console.log(`[반응 업데이트] [4-${i+1}-2] ✅ 반응자 이름 찾음: ${reactorName}`);
+                    } else {
+                      console.log(`[반응 업데이트] [4-${i+1}-2] ⚠️ 반응자 이름 없음 (reactorId만 사용)`);
+                    }
+                  } catch (err) {
+                    console.error(`[반응 업데이트] [4-${i+1}-2] 반응자 이름 조회 예외:`, err.message);
+                  }
+                } else {
+                  console.warn(`[반응 업데이트] [4-${i+1}-2] ⚠️ reactorId가 없음`);
+                }
+                
+                // 관리자 반응 여부 확인
+                const isAdminReaction = CONFIG.ADMIN_USERS.some(admin => {
+                  const adminName = admin.includes('/') ? admin.split('/')[0] : admin;
+                  const adminId = admin.includes('/') ? admin.split('/')[1] : null;
+                  return (reactorName && adminName === reactorName) || (reactorId && adminId && String(reactorId) === adminId);
+                });
+                
+                console.log(`[반응 업데이트] [4-${i+1}-3] 관리자 반응 여부: ${isAdminReaction}`);
+                console.log(`[반응 업데이트] [4-${i+1}-4] saveReaction 호출 시작: messageId=${actualMessageId}, type=${reactionTypeDetail}, reactorName=${reactorName || 'null'}, reactorId=${reactorId || 'null'}`);
+                
+                // 반응 저장
+                const reactionSaveResult = await chatLogger.saveReaction(
+                  actualMessageId,
+                  reactionTypeDetail,
+                  reactorName,
+                  reactorId ? String(reactorId) : null,
+                  isAdminReaction
+                );
+                
+                console.log(`[반응 업데이트] [4-${i+1}-5] saveReaction 결과:`, reactionSaveResult ? `성공 (id=${reactionSaveResult.id})` : '실패 또는 중복');
+                
+                if (reactionSaveResult) {
+                  console.log(`[반응 업데이트] [4-${i+1}-6] 로그 저장 시작`);
+                  try {
+                    await moderationLogger.saveReactionLog({
+                      roomName: room,
+                      targetMessageId: String(targetMessageId),
+                      targetMessageText: null,
+                      reactorName: reactorName,
+                      reactorId: reactorId ? String(reactorId) : null,
+                      reactionType: reactionTypeDetail,
+                      isAdminReaction: isAdminReaction
+                    });
+                    console.log(`[반응 업데이트] [4-${i+1}-6] ✅ 로그 저장 성공`);
+                  } catch (logErr) {
+                    console.error(`[반응 업데이트] [4-${i+1}-6] ❌ 로그 저장 실패:`, logErr.message);
+                  }
+                  console.log(`[반응 추가] ✅ 저장 성공: messageId=${actualMessageId}, type=${reactionTypeDetail}, reactor=${reactorName || reactorId}`);
+                } else {
+                  console.warn(`[반응 추가] ⚠️ 저장 실패 또는 중복: messageId=${actualMessageId}, type=${reactionTypeDetail}, reactor=${reactorName || reactorId}`);
+                }
+              }
+            } else {
+              console.log(`[반응 업데이트] [4단계] 처리할 반응 없음 (newReactions.length=${newReactions.length}, allReactions.length=${allReactions.length})`);
+            }
+            
+            // 2. 제거된 반응 삭제
+            console.log(`[반응 업데이트] [5단계] 제거된 반응 삭제 시작: ${removedReactions.length}개`);
+            if (Array.isArray(removedReactions) && removedReactions.length > 0) {
+              for (let i = 0; i < removedReactions.length; i++) {
+                const reactionDetail = removedReactions[i];
+                console.log(`[반응 업데이트] [5-${i+1}] 반응 삭제 ${i+1}/${removedReactions.length} 처리 시작:`, JSON.stringify(reactionDetail));
+                
+                const reactionTypeDetail = reactionDetail.type || reactionDetail.emoType || reactionDetail.reaction || 'thumbs_up';
+                const reactorId = reactionDetail.userId || reactionDetail.user_id || null;
+                
+                if (reactorId) {
+                  try {
+                    console.log(`[반응 업데이트] [5-${i+1}] DB 삭제 시작: messageId=${actualMessageId}, reactorId=${reactorId}, type=${reactionTypeDetail}`);
+                    
+                    // 반응 삭제 (reactor_id와 reaction_type으로 식별)
+                    const { data: deletedData, error: deleteError } = await db.supabase
+                      .from('chat_reactions')
+                      .delete()
+                      .eq('message_id', actualMessageId)
+                      .eq('reactor_id', String(reactorId))
+                      .eq('reaction_type', reactionTypeDetail)
+                      .select();
+                    
+                    if (deleteError) {
+                      console.error(`[반응 업데이트] [5-${i+1}] ❌ 삭제 실패:`, deleteError);
+                      console.error(`[반응 삭제] 실패: messageId=${actualMessageId}, reactorId=${reactorId}, type=${reactionTypeDetail}`, deleteError);
+                    } else {
+                      const deletedCount = deletedData ? deletedData.length : 0;
+                      if (deletedCount > 0) {
+                        console.log(`[반응 업데이트] [5-${i+1}] ✅ 삭제 성공: ${deletedCount}개 레코드 삭제됨`);
+                        console.log(`[반응 삭제] ✅ 성공: messageId=${actualMessageId}, reactorId=${reactorId}, type=${reactionTypeDetail}`);
+                      } else {
+                        console.warn(`[반응 업데이트] [5-${i+1}] ⚠️ 삭제할 레코드 없음 (이미 삭제되었거나 존재하지 않음)`);
+                      }
+                    }
+                  } catch (err) {
+                    console.error(`[반응 업데이트] [5-${i+1}] ❌ 삭제 예외:`, err.message);
+                    console.error(`[반응 삭제] 오류:`, err.message);
+                    console.error(`[반응 삭제] 스택 트레이스:`, err.stack);
+                  }
+                } else {
+                  console.warn(`[반응 업데이트] [5-${i+1}] ⚠️ reactorId가 없어서 삭제 불가`);
+                }
+              }
+            } else {
+              console.log(`[반응 업데이트] [5단계] 제거된 반응 없음 (removedReactions.length=${removedReactions.length})`);
+            }
+            
+            // 3. fallback: new_reactions가 없고 supplement가 있는 경우 (기존 로직)
+            console.log(`[반응 업데이트] [6단계] Fallback 처리 확인: newReactions=${newReactions.length}, removedReactions=${removedReactions.length}, supplement=${supplement ? '있음' : '없음'}, newCount=${newCount}`);
+            if (newReactions.length === 0 && removedReactions.length === 0 && supplement && newCount > 0) {
+              console.log(`[반응 업데이트] [6단계] Fallback 모드 시작: supplement에서 반응 정보 추출`);
+              try {
+                let supplementData = supplement;
+                if (typeof supplement === 'string') {
+                  console.log(`[반응 업데이트] [6-1] supplement 파싱 시작 (문자열)`);
+                  supplementData = JSON.parse(supplement);
+                  console.log(`[반응 업데이트] [6-1] ✅ supplement 파싱 성공`);
+                } else {
+                  console.log(`[반응 업데이트] [6-1] supplement는 이미 객체`);
+                }
+                
+                if (supplementData && typeof supplementData === 'object') {
+                  const reactions = supplementData.reactions || supplementData.emoticons || [];
+                  console.log(`[반응 업데이트] [6-2] reactions 배열 추출: ${reactions.length}개`);
+                  
+                  if (Array.isArray(reactions) && reactions.length > 0) {
+                    console.log(`[반응 업데이트] [6-3] fallback: supplement에서 ${reactions.length}개 반응 상세 정보 발견`);
+                    
+                    // 각 반응별로 저장 (중복 체크는 saveReaction에서 처리)
+                    for (let i = 0; i < reactions.length; i++) {
+                      const reactionDetail = reactions[i];
+                      console.log(`[반응 업데이트] [6-3-${i+1}] 반응 ${i+1}/${reactions.length} 처리:`, JSON.stringify(reactionDetail));
+                      
+                      const reactionTypeDetail = reactionDetail.type || reactionDetail.emoType || reactionDetail.reaction || 'thumbs_up';
+                      const reactorId = reactionDetail.userId || reactionDetail.user_id || null;
+                      
+                      let reactorName = null;
+                      if (reactorId) {
+                        try {
+                          console.log(`[반응 업데이트] [6-3-${i+1}-1] 반응자 이름 조회: reactorId=${reactorId}`);
+                          const { data: userData, error: userQueryError } = await db.supabase
+                            .from('chat_messages')
+                            .select('sender_name')
+                            .eq('sender_id', String(reactorId))
+                            .order('created_at', { ascending: false })
+                            .limit(1)
+                            .maybeSingle();
+                          
+                          if (userQueryError) {
+                            console.warn(`[반응 업데이트] [6-3-${i+1}-1] 조회 오류:`, userQueryError);
+                          } else if (userData && userData.sender_name) {
+                            reactorName = userData.sender_name;
+                            console.log(`[반응 업데이트] [6-3-${i+1}-1] ✅ 반응자 이름: ${reactorName}`);
+                          }
+                        } catch (err) {
+                          console.error(`[반응 업데이트] [6-3-${i+1}-1] 조회 예외:`, err.message);
+                        }
+                      }
+                      
+                      const isAdminReaction = CONFIG.ADMIN_USERS.some(admin => {
+                        const adminName = admin.includes('/') ? admin.split('/')[0] : admin;
+                        const adminId = admin.includes('/') ? admin.split('/')[1] : null;
+                        return (reactorName && adminName === reactorName) || (reactorId && adminId && String(reactorId) === adminId);
+                      });
+                      
+                      console.log(`[반응 업데이트] [6-3-${i+1}-2] saveReaction 호출: messageId=${actualMessageId}, type=${reactionTypeDetail}, reactorName=${reactorName || 'null'}, reactorId=${reactorId || 'null'}`);
+                      
+                      const reactionSaveResult = await chatLogger.saveReaction(
+                        actualMessageId,
+                        reactionTypeDetail,
+                        reactorName,
+                        reactorId ? String(reactorId) : null,
+                        isAdminReaction
+                      );
+                      
+                      console.log(`[반응 업데이트] [6-3-${i+1}-2] saveReaction 결과:`, reactionSaveResult ? `성공 (id=${reactionSaveResult.id})` : '실패 또는 중복');
+                      
+                      if (reactionSaveResult) {
+                        try {
+                          await moderationLogger.saveReactionLog({
+                            roomName: room,
+                            targetMessageId: String(targetMessageId),
+                            targetMessageText: null,
+                            reactorName: reactorName,
+                            reactorId: reactorId ? String(reactorId) : null,
+                            reactionType: reactionTypeDetail,
+                            isAdminReaction: isAdminReaction
+                          });
+                          console.log(`[반응 업데이트] [6-3-${i+1}-3] ✅ 로그 저장 성공`);
+                        } catch (logErr) {
+                          console.error(`[반응 업데이트] [6-3-${i+1}-3] ❌ 로그 저장 실패:`, logErr.message);
+                        }
+                        console.log(`[반응 업데이트] ✅ 저장 성공: messageId=${actualMessageId}, type=${reactionTypeDetail}, reactor=${reactorName || reactorId}`);
+                      } else {
+                        console.warn(`[반응 업데이트] ⚠️ 저장 실패 또는 중복: messageId=${actualMessageId}, type=${reactionTypeDetail}`);
+                      }
+                    }
+                  } else {
+                    console.log(`[반응 업데이트] [6-2] reactions 배열이 비어있음`);
+                  }
+                } else {
+                  console.warn(`[반응 업데이트] [6-1] supplementData가 객체가 아님:`, typeof supplementData);
+                }
+              } catch (err) {
+                console.error('[반응 업데이트] [6단계] supplement 파싱 오류:', err.message);
+                console.error('[반응 업데이트] [6단계] 스택 트레이스:', err.stack);
+              }
+            } else {
+              console.log(`[반응 업데이트] [6단계] Fallback 조건 불만족 (스킵)`);
+            }
+            
+            console.log(`[반응 업데이트] ========== 반응 이벤트 처리 완료 ==========`);
+          } catch (err) {
+            console.error('[반응 업데이트] ========== 처리 오류 발생 ==========');
+            console.error('[반응 업데이트] 오류 메시지:', err.message);
+            console.error('[반응 업데이트] 스택 트레이스:', err.stack);
+            console.error('[반응 업데이트] 오류 상세:', JSON.stringify({
+              message: err.message,
+              stack: err.stack,
+              name: err.name
+            }, null, 2));
+          }
+          return; // reaction_update는 여기서 처리 완료
+        }
+        
+        // 기존 반응 메시지 처리 (type: 'reaction')
         const chatLogger = require('./db/chatLogger');
         
         try {
@@ -1368,9 +1738,10 @@ wss.on('connection', function connection(ws, req) {
               targetMessageId,
               reactorName,
               reactorId,
-              json: JSON.stringify(json).substring(0, 200),
               sender: sender,
-              room: room
+              room: room,
+              json_keys: json ? Object.keys(json).join(', ') : 'null',
+              json_preview: json ? JSON.stringify(json).substring(0, 200) : 'null'
             });
           }
         } catch (err) {
@@ -1409,6 +1780,10 @@ wss.on('connection', function connection(ws, req) {
 
       // 2️⃣ IrisLink message 타입 처리
       if (messageData.type === 'message') {
+        // ⚠️ 중요: 일반 메시지 수신 로그
+        const kakaoLogId = messageData.json?._id || messageData.json?.kakao_log_id || 'N/A';
+        console.log(`[메시지 수신] ⚠️⚠️⚠️ 일반 메시지 수신: type=message, kakao_log_id=${kakaoLogId}, room=${messageData.room || 'N/A'}, sender=${messageData.sender || 'N/A'}`);
+        
         // room, sender, isGroupChat 변수가 이미 선언되었을 수 있으므로 재선언하지 않고 재할당만 수행
         if (typeof room === 'undefined') {
           var room = messageData.room;
@@ -1655,17 +2030,29 @@ wss.on('connection', function connection(ws, req) {
                     console.log(`[복호화] 시도: user_id=${uid}, enc=${encTry}, 메시지 길이=${decryptedMessage.length}`);
                     // userId는 문자열로, encType은 숫자로 전달
                     const d = decryptKakaoTalkMessage(decryptedMessage, String(uid), Number(encTry));
-                    if (d && d !== decryptedMessage) {
+                    if (d && d !== decryptedMessage && d !== null) {
                       // 복호화된 결과가 원본과 다르고, 유효한 텍스트인지 확인
                       const hasControlChars = /[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(d);
-                      if (!hasControlChars && d.length > 0) {
+                      
+                      // 추가 검증: 복호화된 결과가 의미 있는 텍스트인지 확인
+                      // 1. 빈 문자열이 아니어야 함
+                      // 2. 제어문자가 없어야 함
+                      // 3. 너무 짧지 않아야 함 (최소 1자)
+                      // 4. base64 패턴이 아니어야 함 (복호화 실패 시 base64가 그대로 나올 수 있음)
+                      const isBase64Pattern = /^[A-Za-z0-9+/=]+$/.test(d) && d.length > 20;
+                      const isValidText = d.length > 0 && !hasControlChars && !isBase64Pattern;
+                      
+                      if (isValidText) {
                         decryptedFound = d;
                         console.log(`[✓ 복호화 성공] 메시지 ID: ${json._id}, user_id=${uid}, enc=${encTry}, 복호화 길이: ${d.length}`);
                         console.log(`[✓ 복호화 성공] 복호화된 메시지 미리보기: "${d.substring(0, 100)}${d.length > 100 ? '...' : ''}"`);
                         break;
                       } else {
-                        console.log(`[복호화] 복호화 결과가 유효하지 않음: 제어문자 포함 또는 빈 문자열`);
+                        console.log(`[복호화] 복호화 결과가 유효하지 않음: 제어문자=${hasControlChars}, base64패턴=${isBase64Pattern}, 길이=${d.length}`);
+                        console.log(`[복호화] 복호화 결과 샘플: "${d.substring(0, 50)}${d.length > 50 ? '...' : ''}"`);
                       }
+                    } else {
+                      console.log(`[복호화] 복호화 실패 또는 결과 없음: d=${d ? '있음' : 'null'}, 원본과 동일=${d === decryptedMessage}`);
                     }
                   }
                   if (decryptedFound) break;
@@ -1981,13 +2368,115 @@ wss.on('connection', function connection(ws, req) {
           isGroupChat: isGroupChat !== undefined ? isGroupChat : true
         });
         
+        // ⚠️ 중요: handleMessage 호출 전에 복호화된 senderName 사용
+        // senderName이 복호화된 상태면 우선 사용, user_id가 없으면 sender에서 추출하여 조합
+        let finalSender = sender || senderName || '';
+        if (senderName && senderName !== sender) {
+            // senderName이 복호화된 상태인지 확인 (base64 패턴이 아니면 복호화됨)
+            const senderNameIsDecrypted = !(senderName.length > 10 && senderName.length % 4 === 0 && /^[A-Za-z0-9+/=]+$/.test(senderName));
+            
+            if (senderNameIsDecrypted) {
+                // senderName에 user_id가 있는지 확인
+                if (senderName.includes('/')) {
+                    // 이미 "이름/user_id" 형식이면 그대로 사용
+                    finalSender = senderName;
+                    console.log(`[handleMessage 호출 전] ✅ 복호화된 senderName 사용: "${finalSender}"`);
+                } else {
+                    // senderName에 user_id가 없으면 sender에서 추출하여 조합
+                    const extractedSenderId = sender && sender.includes('/') ? sender.split('/')[sender.split('/').length - 1] : senderId;
+                    if (extractedSenderId && /^\d+$/.test(String(extractedSenderId))) {
+                        finalSender = `${senderName}/${extractedSenderId}`;
+                        console.log(`[handleMessage 호출 전] ✅ 복호화된 senderName + senderId 조합: "${finalSender}"`);
+                    } else {
+                        // senderId를 찾을 수 없으면 복호화된 senderName만 사용
+                        finalSender = senderName;
+                        console.log(`[handleMessage 호출 전] ⚠️ 복호화된 senderName 사용 (user_id 없음): "${finalSender}"`);
+                    }
+                }
+            }
+        }
+        
         console.log(`[${new Date().toISOString()}] ═══════════════════════════════════════════════════════`);
         console.log(`[${new Date().toISOString()}] handleMessage 호출 전:`);
         console.log(`  room: "${decryptedRoomName || ''}"`);
         console.log(`  msg: "${(decryptedMessage || '').substring(0, 100)}"`);
-        console.log(`  sender: "${senderName || sender || ''}"`);
+        console.log(`  sender (원본): "${sender || ''}"`);
+        console.log(`  senderName (복호화): "${senderName || ''}"`);
+        console.log(`  finalSender (최종): "${finalSender}"`);
         console.log(`  sender_id: "${senderId || '없음'}"`);
         console.log(`  isGroupChat: ${isGroupChat !== undefined ? isGroupChat : true}`);
+        
+        // ⚠️ 중요: 이미지 메시지 판단을 메시지 저장 전에 수행
+        // 이미지 메시지가 텍스트 메시지로 처리되지 않도록 함
+        let isImageMessageEarly = false;
+        let imageUrlEarly = null;
+        
+        if (json) {
+          try {
+            // msg_type을 숫자 또는 문자열로 정규화
+            let msgType = json.msg_type;
+            if (msgType === null || msgType === undefined) {
+              msgType = json.type;
+            }
+            if (typeof msgType === 'number') {
+              msgType = String(msgType);
+            }
+            
+            const imageUrlFromClient = json.image_url || null;
+            const hasImageFromClient = json.has_image || false;
+            const hasImageBool = hasImageFromClient === true || hasImageFromClient === 'true' || hasImageFromClient === 1 || hasImageFromClient === '1';
+            
+            // ⚠️ 중요: ref 코드 기준으로 이미지 타입은 2(PhotoChat), 27(MultiPhotoChat)만
+            // type 12는 이모티콘이므로 이미지로 처리하지 않음
+            const imageTypes = [2, 27, '2', '27'];
+            // msg_type이 2 또는 27이면 무조건 이미지 메시지로 처리
+            isImageMessageEarly = imageUrlFromClient || hasImageBool || (msgType && imageTypes.includes(String(msgType)));
+            
+            console.log(`[이미지 조기 감지] 판단 로직:`);
+            console.log(`  - imageUrlFromClient: ${!!imageUrlFromClient} (${imageUrlFromClient ? imageUrlFromClient.substring(0, 50) + '...' : 'null'})`);
+            console.log(`  - hasImageBool: ${hasImageBool} (원본: ${json.has_image}, 타입: ${typeof json.has_image})`);
+            console.log(`  - msgType: ${msgType} (원본: ${json.msg_type}, 타입: ${typeof msgType})`);
+            console.log(`  - imageTypes.includes(${msgType}): ${msgType ? imageTypes.includes(String(msgType)) : false}`);
+            console.log(`  - isImageMessageEarly (초기): ${isImageMessageEarly}`);
+            
+            if (msgType && imageTypes.includes(String(msgType)) && !hasImageBool && !imageUrlFromClient) {
+              // msg_type이 이미지 타입인데 has_image와 image_url이 없으면 강제로 이미지로 처리
+              console.log(`[이미지 조기 감지] ⚠️ msg_type=${msgType}이지만 has_image와 image_url이 없음. 이미지 메시지로 강제 처리`);
+              isImageMessageEarly = true;
+            }
+            
+            console.log(`[이미지 조기 감지] 최종 isImageMessageEarly: ${isImageMessageEarly}`);
+            
+            if (isImageMessageEarly) {
+              console.log(`[이미지 조기 감지] ✅ 이미지 메시지로 판단됨 (저장 전): msgType=${msgType}, image_url=${!!imageUrlFromClient}, has_image=${hasImageBool}`);
+              
+              // 이미지 URL 추출
+              const { extractImageUrl } = require('./db/utils/attachmentExtractor');
+              let attachmentData = json.attachment_decrypted || json.attachment || null;
+              
+              if (attachmentData && typeof attachmentData === 'string' && !json.attachment_decrypted) {
+                try {
+                  attachmentData = JSON.parse(attachmentData);
+                } catch (e) {
+                  // 파싱 실패
+                }
+              }
+              
+              imageUrlEarly = imageUrlFromClient;
+              if (!imageUrlEarly && attachmentData) {
+                imageUrlEarly = extractImageUrl(attachmentData, msgType);
+              }
+              
+              if (imageUrlEarly) {
+                console.log(`[이미지 조기 감지] ✅ 이미지 URL 추출 성공: ${imageUrlEarly.substring(0, 50)}...`);
+              } else {
+                console.log(`[이미지 조기 감지] ⚠️ 이미지 메시지로 판단되었지만 URL 추출 실패`);
+              }
+            }
+          } catch (err) {
+            console.error('[이미지 조기 감지] 오류:', err.message);
+          }
+        }
         
         // 채팅 메시지 저장 (비동기, 에러가 나도 계속 진행)
         const chatLogger = require('./db/chatLogger');
@@ -1998,16 +2487,202 @@ wss.on('connection', function connection(ws, req) {
         
         // 클라이언트에서 보내는 reply_to_message_id는 실제로 kakao_log_id
         const replyToKakaoLogIdRaw = json?.reply_to_message_id || json?.reply_to || json?.parent_message_id || null;
+        console.log(`[답장 링크] 클라이언트에서 받은 값: reply_to_message_id=${json?.reply_to_message_id}, reply_to=${json?.reply_to}, parent_message_id=${json?.parent_message_id}, 최종=${replyToKakaoLogIdRaw}`);
         
         // attachment에서도 추출 시도 (단일 진실 소스 함수 사용)
-        const replyToKakaoLogIdFromAttachment = extractReplyTarget(
-            json?.attachment_decrypted || json?.attachment,
-            null,  // referer는 이미 위에서 확인
-            json?.msg_type || json?.type
-        );
+        // ⚠️ 중요: msg_type이 26(답장)이거나 attachment/referer가 있으면 답장으로 처리
+        const msgTypeForCheck = json?.msg_type || json?.type || json?.msgType || null;
+        let replyToKakaoLogIdFromAttachment = null;
         
-        // 최종 reply_to_kakao_log_id (우선순위: 클라이언트 필드 > attachment 추출)
-        const replyToKakaoLogId = replyToKakaoLogIdRaw || replyToKakaoLogIdFromAttachment;
+        // ⚠️ 개선: msg_type=0이어도 attachment나 referer가 있으면 답장으로 처리
+        const hasAttachment = !!(json?.attachment || json?.attachment_decrypted);
+        const hasReferer = !!(replyToKakaoLogIdRaw);
+        const isReplyMessage = msgTypeForCheck === 26 || msgTypeForCheck === '26' || hasAttachment || hasReferer;
+        
+        if (isReplyMessage) {
+            console.log(`[답장 링크] ⚠️⚠️⚠️ 답장 메시지 감지 시작: msg_type=${msgTypeForCheck}, hasAttachment=${hasAttachment}, hasReferer=${hasReferer}, kakao_log_id=${json?._id || json?.kakao_log_id || 'N/A'}`);
+            
+            // attachment 복호화 시도 (msg_type=26이거나 attachment가 있는 경우)
+            let attachmentToUse = json?.attachment_decrypted || json?.attachment;
+            console.log(`[답장 링크] ⚠️⚠️⚠️ attachmentToUse 초기값: 타입=${typeof attachmentToUse}, 존재=${!!attachmentToUse}, attachment_decrypted=${!!json?.attachment_decrypted}, attachment=${!!json?.attachment}`);
+            
+            // attachment_decrypted가 없고 attachment가 암호화된 문자열인 경우 복호화 시도
+            // ⚠️ 개선: msg_type=0이어도 attachment가 있으면 복호화 시도
+            if (!json?.attachment_decrypted && json?.attachment && typeof json.attachment === 'string' && (msgTypeForCheck === 26 || msgTypeForCheck === '26' || hasAttachment)) {
+                try {
+                    const myUserId = json?.myUserId || json?.userId || null;
+                    const encType = json?.encType || null;
+                    
+                    // ⚠️ 중요: myUserId와 encType 상태 확인 로그
+                    console.log(`[답장 링크] ⚠️⚠️⚠️ 복호화 조건 확인: myUserId=${myUserId}, encType=${encType}, 조건=${!!(myUserId && encType)}`);
+                    
+                    if (myUserId && encType) {
+                        console.log(`[답장 링크] attachment 복호화 시도: myUserId=${myUserId}, encType=${encType}, attachment 길이=${json.attachment.length}`);
+                        
+                        // ⚠️ 개선: 여러 user_id 후보로 복호화 시도
+                        const userIdCandidates = [
+                            String(myUserId),  // 1순위: myUserId
+                            String(json?.userId || json?.user_id || ''),  // 2순위: userId
+                            String(json?.sender_id || '')  // 3순위: sender_id
+                        ].filter(id => id && id !== '0' && id !== '');
+                        
+                        let decryptedAttachment = null;
+                        console.log(`[답장 링크] ⚠️ 복호화 후보 목록: userIdCandidates=${JSON.stringify(userIdCandidates)}, encType=${encType}`);
+                        
+                        for (const userId of userIdCandidates) {
+                            try {
+                                console.log(`[답장 링크] 복호화 시도: userId=${userId}, encType=${encType}`);
+                                const decrypted = decryptKakaoTalkMessage(json.attachment, userId, encType);
+                                if (decrypted) {
+                                    // ⚠️ 중요: 복호화 결과가 유효한지 확인 (제어 문자 체크)
+                                    const hasControlChars = /[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(decrypted);
+                                    if (hasControlChars || decrypted.length === 0) {
+                                        console.log(`[답장 링크] ⚠️ 복호화 결과가 바이너리 데이터 (제어 문자 포함 또는 빈 문자열), 다음 후보 시도: userId=${userId}, encType=${encType}`);
+                                        continue;  // 다음 후보 시도
+                                    }
+                                    decryptedAttachment = decrypted;
+                                    console.log(`[답장 링크] ✅ attachment 복호화 성공: userId=${userId}, encType=${encType}`);
+                                    break;
+                                } else {
+                                    console.log(`[답장 링크] ⚠️ 복호화 결과 null: userId=${userId}, encType=${encType}`);
+                                }
+                            } catch (e) {
+                                console.log(`[답장 링크] ⚠️ 복호화 예외: userId=${userId}, encType=${encType}, 오류=${e.message}`);
+                                // 다음 후보 시도
+                                continue;
+                            }
+                        }
+                        
+                        // encType 후보로도 시도 (31, 30, 32)
+                        if (!decryptedAttachment) {
+                            console.log(`[답장 링크] ⚠️ encType 후보로 복호화 시도 시작`);
+                            const encTypeCandidates = [31, 30, 32];
+                            for (const enc of encTypeCandidates) {
+                                for (const userId of userIdCandidates) {
+                                    try {
+                                        console.log(`[답장 링크] 복호화 시도: userId=${userId}, encType=${enc}`);
+                                        const decrypted = decryptKakaoTalkMessage(json.attachment, userId, enc);
+                                        if (decrypted) {
+                                            // ⚠️ 중요: 복호화 결과가 유효한지 확인 (제어 문자 체크)
+                                            const hasControlChars = /[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(decrypted);
+                                            if (hasControlChars || decrypted.length === 0) {
+                                                console.log(`[답장 링크] ⚠️ 복호화 결과가 바이너리 데이터 (제어 문자 포함 또는 빈 문자열), 다음 후보 시도: userId=${userId}, encType=${enc}`);
+                                                continue;  // 다음 후보 시도
+                                            }
+                                            decryptedAttachment = decrypted;
+                                            console.log(`[답장 링크] ✅ attachment 복호화 성공: userId=${userId}, encType=${enc}`);
+                                            break;
+                                        } else {
+                                            console.log(`[답장 링크] ⚠️ 복호화 결과 null: userId=${userId}, encType=${enc}`);
+                                        }
+                                    } catch (e) {
+                                        console.log(`[답장 링크] ⚠️ 복호화 예외: userId=${userId}, encType=${enc}, 오류=${e.message}`);
+                                        continue;
+                                    }
+                                }
+                                if (decryptedAttachment) break;
+                            }
+                        }
+                        
+                        if (decryptedAttachment) {
+                            // ⚠️ 중요: 복호화 결과가 유효한지 확인 (제어 문자 체크)
+                            const hasControlChars = /[\x00-\x08\x0B-\x0C\x0E-\x1F]/.test(decryptedAttachment);
+                            const isBinary = hasControlChars || decryptedAttachment.length === 0;
+                            
+                            if (isBinary) {
+                                console.warn(`[답장 링크] ⚠️ 복호화 결과가 바이너리 데이터 (제어 문자 포함 또는 빈 문자열), 다음 후보 시도`);
+                                decryptedAttachment = null;  // 다음 후보 시도
+                            } else {
+                                console.log(`[답장 링크] ✅ attachment 복호화 성공: ${decryptedAttachment.substring(0, 100)}...`);
+                                // 복호화된 결과를 JSON으로 파싱 시도
+                                try {
+                                    attachmentToUse = JSON.parse(decryptedAttachment);
+                                    console.log(`[답장 링크] ✅ 복호화 후 JSON 파싱 성공`);
+                                } catch (parseError) {
+                                    // ⚠️ 개선: JSON 파싱 실패 시 fallback + 로그 강화
+                                    try {
+                                        // 문자열이 JSON 형태인지 다시 시도
+                                        attachmentToUse = JSON.parse(decryptedAttachment);
+                                    } catch (parseError2) {
+                                        // JSON이 아니면 문자열 그대로 사용
+                                        attachmentToUse = decryptedAttachment;
+                                        console.log(`[답장 링크] ⚠️ 복호화 후 JSON 파싱 실패, 문자열 그대로 사용: ${parseError.message}`);
+                                        console.log(`[답장 링크] 디버그 - attachment 키/길이: ${typeof attachmentToUse === 'object' && attachmentToUse ? Object.keys(attachmentToUse).join(', ') : 'N/A'}, 길이=${typeof attachmentToUse === 'string' ? attachmentToUse.length : 'N/A'}`);
+                                    }
+                                }
+                            }
+                        } else {
+                            console.log(`[답장 링크] ⚠️ attachment 복호화 실패 (모든 후보 시도 완료)`);
+                        }
+                    } else {
+                        console.log(`[답장 링크] ⚠️ 복호화 불가: myUserId=${myUserId}, encType=${encType}`);
+                    }
+                } catch (decryptError) {
+                    console.error(`[답장 링크] attachment 복호화 예외: ${decryptError.message}`);
+                    console.error(`[답장 링크] 디버그 - attachment 타입: ${typeof json.attachment}, 길이: ${json.attachment ? json.attachment.length : 'N/A'}`);
+                }
+            }
+            
+            // ⚠️ 중요: attachmentToUse가 문자열인 경우에도 extractReplyTarget 시도
+            console.log(`[답장 링크] ⚠️ extractReplyTarget 호출 전: attachmentToUse 타입=${typeof attachmentToUse}, 길이=${typeof attachmentToUse === 'string' ? attachmentToUse.length : 'N/A'}`);
+            if (attachmentToUse && typeof attachmentToUse === 'object') {
+                const keys = Object.keys(attachmentToUse);
+                console.log(`[답장 링크] ⚠️⚠️⚠️ attachmentToUse 객체 키 목록: ${keys.join(', ')}`);
+                if (attachmentToUse.src_logId !== undefined) {
+                    console.log(`[답장 링크] ⚠️⚠️⚠️ attachmentToUse.src_logId: ${attachmentToUse.src_logId}, 타입=${typeof attachmentToUse.src_logId}`);
+                }
+                if (attachmentToUse.src_message !== undefined) {
+                    console.log(`[답장 링크] ⚠️⚠️⚠️ attachmentToUse.src_message: ${attachmentToUse.src_message}, 타입=${typeof attachmentToUse.src_message}`);
+                }
+                if (attachmentToUse.logId !== undefined) {
+                    console.log(`[답장 링크] ⚠️⚠️⚠️ attachmentToUse.logId: ${attachmentToUse.logId}, 타입=${typeof attachmentToUse.logId}`);
+                }
+            }
+            replyToKakaoLogIdFromAttachment = extractReplyTarget(
+                attachmentToUse,
+                null,  // referer는 이미 위에서 확인
+                msgTypeForCheck
+            );
+            console.log(`[답장 링크] ⚠️⚠️⚠️ extractReplyTarget 결과: ${replyToKakaoLogIdFromAttachment}, 타입=${typeof replyToKakaoLogIdFromAttachment}, isReplyMessage=${isReplyMessage}`);
+            if (replyToKakaoLogIdFromAttachment) {
+                console.log(`[답장 링크] ✅✅✅ attachment에서 추출 성공: ${replyToKakaoLogIdFromAttachment}`);
+            } else if (isReplyMessage) {
+                console.log(`[답장 링크] ⚠️ 답장 메시지인데 attachment에서 추출 실패`);
+                console.log(`[답장 링크] 디버그 - attachmentToUse 타입: ${typeof attachmentToUse}, attachment 존재: ${!!json?.attachment}, attachment_decrypted 존재: ${!!json?.attachment_decrypted}`);
+                console.log(`[답장 링크] 디버그 - json.msg_type=${json?.msg_type}, json.type=${json?.type}, json.msgType=${json?.msgType}, msgTypeForCheck=${msgTypeForCheck}`);
+                console.log(`[답장 링크] 디버그 - hasAttachment=${hasAttachment}, hasReferer=${hasReferer}, replyToKakaoLogIdRaw=${replyToKakaoLogIdRaw}`);
+                
+                // ⚠️ 추가: 원본 attachment 문자열에서도 패턴 매칭 시도
+                if (json?.attachment && typeof json.attachment === 'string') {
+                    console.log(`[답장 링크] ⚠️ 원본 attachment 문자열에서 패턴 매칭 시도`);
+                    const patternMatch = extractReplyTarget(json.attachment, null, msgTypeForCheck);
+                    if (patternMatch) {
+                        console.log(`[답장 링크] ✅ 원본 attachment에서 패턴 매칭으로 추출: ${patternMatch}`);
+                        replyToKakaoLogIdFromAttachment = patternMatch;
+                    }
+                }
+            }
+        }
+        
+        // 최종 reply_to_kakao_log_id (우선순위: 클라이언트 reply_to_message_id > attachment 추출)
+        // ⚠️ 개선: 클라이언트가 reply_to_message_id를 보내면 그 값을 우선 신뢰
+        const msgType = json?.msg_type || json?.type || json?.msgType || null;
+        const clientReplyToMessageId = json?.reply_to_message_id || null;
+        
+        // ⚠️ 개선: 클라이언트가 reply_to_message_id를 보내면 우선 사용
+        const replyToKakaoLogId = clientReplyToMessageId 
+            ? clientReplyToMessageId  // 클라이언트 필드 우선
+            : ((isReplyMessage && replyToKakaoLogIdFromAttachment)
+                ? replyToKakaoLogIdFromAttachment
+                : (replyToKakaoLogIdRaw || replyToKakaoLogIdFromAttachment));
+        
+        console.log(`[답장 링크] 최종 reply_to_kakao_log_id: ${replyToKakaoLogId} (client=${clientReplyToMessageId}, raw=${replyToKakaoLogIdRaw}, attachment=${replyToKakaoLogIdFromAttachment}, msg_type=${msgType}, isReplyMessage=${isReplyMessage})`);
+        
+        // ⚠️ 디버그: 답장 메시지 감지 상세 로그
+        if (isReplyMessage) {
+            console.log(`[답장 링크] ⚠️ 답장 메시지 감지: replyToKakaoLogId=${replyToKakaoLogId}, replyToKakaoLogIdRaw=${replyToKakaoLogIdRaw}, replyToKakaoLogIdFromAttachment=${replyToKakaoLogIdFromAttachment}`);
+            console.log(`[답장 링크] 상세: msg_type=${msgType}, hasAttachment=${hasAttachment}, hasReferer=${hasReferer}`);
+        }
         
         // reply_to_kakao_log_id를 DB id로 변환 시도 (백필 가능하므로 실패해도 저장은 진행)
         let replyToMessageId = null;
@@ -2015,6 +2690,7 @@ wss.on('connection', function connection(ws, req) {
             try {
                 const { safeParseInt } = require('./db/utils/attachmentExtractor');
                 const numericLogId = safeParseInt(replyToKakaoLogId);
+                console.log(`[답장 링크] safeParseInt 결과: ${numericLogId}`);
                 if (numericLogId) {
                     const db = require('./db/database');
                     const { data: replyToMessage } = await db.supabase
@@ -2024,20 +2700,22 @@ wss.on('connection', function connection(ws, req) {
                         .eq('room_name', decryptedRoomName || '')  // ✅ room scope로 제한
                         .maybeSingle();  // ✅ single() 대신 maybeSingle() 사용
                     
+                    console.log(`[답장 링크] DB 조회 결과: ${replyToMessage ? `id=${replyToMessage.id}` : 'not found'}, room="${decryptedRoomName || ''}", kakao_log_id=${numericLogId}`);
+                    
                     if (replyToMessage && replyToMessage.id) {
                         replyToMessageId = replyToMessage.id;
-                        if (process.env.DEBUG_REPLY_LINK === '1') {
-                            console.log(`[답장 링크] ✅ 즉시 변환 성공: kakao_log_id(${numericLogId}) → DB id(${replyToMessageId})`);
-                        }
+                        console.log(`[답장 링크] ✅ 즉시 변환 성공: kakao_log_id(${numericLogId}) → DB id(${replyToMessageId})`);
                     } else {
-                        if (process.env.DEBUG_REPLY_LINK === '1') {
-                            console.log(`[답장 링크] ⏳ 백필 필요: kakao_log_id(${numericLogId}), room="${decryptedRoomName || ''}"`);
-                        }
+                        console.log(`[답장 링크] ⏳ 백필 필요: kakao_log_id(${numericLogId}), room="${decryptedRoomName || ''}"`);
                     }
+                } else {
+                    console.warn(`[답장 링크] ⚠️ safeParseInt 실패: replyToKakaoLogId=${replyToKakaoLogId}`);
                 }
             } catch (err) {
-                console.warn('[답장 링크] 변환 실패 (백필에서 재시도):', err.message);
+                console.warn('[답장 링크] 변환 실패 (백필에서 재시도):', err.message, err.stack);
             }
+        } else {
+            console.log(`[답장 링크] reply_to_kakao_log_id가 없음 (일반 메시지)`);
         }
         
         const threadId = json?.thread_id || json?.thread_message_id || null;
@@ -2069,71 +2747,370 @@ wss.on('connection', function connection(ws, req) {
             decryptedMessage || '',
             isGroupChat !== undefined ? isGroupChat : true,
             metadata,
-            replyToMessageId,  // DB id (변환 성공 시)
-            replyToKakaoLogId,  // kakao_log_id (클라이언트에서 보내는 값)
+            replyToMessageId,  // DB id (변환 성공 시, null 가능)
             threadId,
             sender,  // raw_sender (원본 sender 문자열)
-            json?._id || json?.kakao_log_id  // kakao_log_id
+            json?._id || json?.kakao_log_id,  // kakao_log_id
+            replyToKakaoLogId  // reply_to_kakao_log_id (클라이언트에서 보내는 값)
           );
+          
+          // ⚠️ 중요: 메시지 저장 성공/실패 로그
+          if (savedMessage) {
+            console.log(`[메시지 저장] ✅ 성공: id=${savedMessage.id}, kakao_log_id=${savedMessage.kakao_log_id || json?._id || json?.kakao_log_id || 'N/A'}, room="${decryptedRoomName || ''}", sender="${senderName || sender || ''}"`);
+          } else {
+            console.error(`[메시지 저장] ❌ 실패: savedMessage가 null, kakao_log_id=${json?._id || json?.kakao_log_id || 'N/A'}, room="${decryptedRoomName || ''}", sender="${senderName || sender || ''}"`);
+          }
           
           // 백필 작업은 saveChatMessage 내부에서 자동 처리됨
           
-          // 이미지 첨부 정보 저장 (메시지 타입이 이미지인 경우)
+          // 이미지 첨부 정보 저장 (메시지 타입이 이미지인 경우 또는 image_url이 있는 경우)
           if (savedMessage && json) {
             try {
-              const msgType = json.msg_type || json.type;
+              // msg_type을 숫자 또는 문자열로 정규화
+              let msgType = json.msg_type;
+              if (msgType === null || msgType === undefined) {
+                msgType = json.type;
+              }
+              // 숫자인 경우 문자열로 변환하여 비교
+              if (typeof msgType === 'number') {
+                msgType = String(msgType);
+              }
               
-              // 이미지 타입: 2 (사진), 12 (이미지 업로드), 27 (사진 앨범)
-              const imageTypes = [2, 12, 27, '2', '12', '27'];
+              const imageUrlFromClient = json.image_url || null;  // 클라이언트에서 추출한 이미지 URL
+              const hasImageFromClient = json.has_image || false;  // 클라이언트에서 이미지 여부 확인
               
-              if (imageTypes.includes(msgType)) {
+              // 디버깅: 전체 JSON 구조 확인 (이미지 관련 필드)
+              console.log(`[이미지 저장] ========== 이미지 메시지 감지 시작 ==========`);
+              console.log(`[이미지 저장] msgType 확인: msgType=${msgType} (원본: ${json.msg_type}, type: ${typeof msgType})`);
+              console.log(`[이미지 저장] 클라이언트 필드: image_url=${imageUrlFromClient ? imageUrlFromClient.substring(0, 50) + '...' : 'null'}, has_image=${hasImageFromClient} (타입: ${typeof json.has_image}, 원본값: ${JSON.stringify(json.has_image)})`);
+              console.log(`[이미지 저장] attachment 필드: attachment=${!!json.attachment}, attachment_decrypted=${!!json.attachment_decrypted}`);
+              if (json.attachment && typeof json.attachment === 'string') {
+                console.log(`[이미지 저장] attachment (문자열) 샘플: ${json.attachment.substring(0, 200)}...`);
+              }
+              if (json.attachment_decrypted && typeof json.attachment_decrypted === 'object') {
+                console.log(`[이미지 저장] attachment_decrypted (객체) keys: ${Object.keys(json.attachment_decrypted).slice(0, 10).join(', ')}`);
+                // attachment_decrypted에서 직접 이미지 URL 확인
+                const attachKeys = Object.keys(json.attachment_decrypted);
+                const possibleImageKeys = ['url', 'thumbnailUrl', 'path', 'path_1', 'xl', 'l', 'm', 's', 'imageUrl', 'image_url', 'photoUrl', 'photo_url'];
+                for (const key of possibleImageKeys) {
+                  if (json.attachment_decrypted[key] && typeof json.attachment_decrypted[key] === 'string') {
+                    console.log(`[이미지 저장] attachment_decrypted[${key}]: ${json.attachment_decrypted[key].substring(0, 50)}...`);
+                  }
+                }
+              }
+              
+              // ⚠️ 중요: ref 코드 기준으로 이미지 타입은 2(PhotoChat), 27(MultiPhotoChat)만
+              // type 12는 이모티콘이므로 이미지로 처리하지 않음
+              // 이미지 타입: 2 (PhotoChat - 단일 사진), 27 (MultiPhotoChat - 멀티 사진)
+              const imageTypes = [2, 27, '2', '27'];
+              
+              // 클라이언트에서 이미지 URL을 추출한 경우 또는 has_image가 true인 경우 또는 msgType이 이미지 타입인 경우
+              // has_image가 문자열 "true" 또는 boolean true 모두 처리
+              const hasImageBool = hasImageFromClient === true || hasImageFromClient === 'true' || hasImageFromClient === 1 || hasImageFromClient === '1';
+              const isImageMessage = imageUrlFromClient || hasImageBool || (msgType && imageTypes.includes(String(msgType)));
+              
+              console.log(`[이미지 저장] 이미지 메시지 판단:`);
+              console.log(`  - imageUrlFromClient 존재: ${!!imageUrlFromClient}`);
+              console.log(`  - hasImageFromClient: ${hasImageFromClient} (원본: ${json.has_image})`);
+              console.log(`  - msgType 매칭: ${msgType && imageTypes.includes(String(msgType))} (msgType=${msgType})`);
+              console.log(`  - 최종 isImageMessage: ${isImageMessage}`);
+              console.log(`[이미지 저장] ==========================================`);
+              
+              if (isImageMessage) {
+                console.log(`[이미지 저장] ✅ 이미지 메시지 감지됨 - 질문 대기 상태 확인 시작`);
+                
                 // Phase 2: attachment 추출 함수 사용 (단일 진실 소스)
                 const { extractImageUrl } = require('./db/utils/attachmentExtractor');
                 
                 // attachment_decrypted 우선 사용, 없으면 attachment
-                const attachmentData = json.attachment_decrypted || json.attachment || null;
-                const imageUrl = extractImageUrl(attachmentData, msgType);
+                let attachmentData = json.attachment_decrypted || json.attachment || null;
+                let attachmentDecrypted = json.attachment_decrypted;
                 
-                if (imageUrl) {
-                  // attachInfo는 metadata 저장용 (전체 attachment 정보)
-                  let attachInfo = null;
-                  if (json.attachment_decrypted && typeof json.attachment_decrypted === 'object') {
-                    attachInfo = json.attachment_decrypted;
-                  } else if (json.attachment) {
-                    if (typeof json.attachment === 'string') {
-                      try {
-                        attachInfo = JSON.parse(json.attachment);
-                      } catch (e) {
-                        // 파싱 실패 시 무시
-                      }
-                    } else if (typeof json.attachment === 'object') {
-                      attachInfo = json.attachment;
+                // attachment가 암호화된 Base64 문자열이면 서버에서 복호화 시도
+                if (!attachmentDecrypted && attachmentData && typeof attachmentData === 'string' && !json.attachment_decrypted) {
+                    // JSON 파싱 시도
+                    try {
+                        attachmentData = JSON.parse(attachmentData);
+                        console.log(`[이미지 저장] ✅ attachment JSON 파싱 성공`);
+                    } catch (e) {
+                        // JSON 파싱 실패 → Base64 암호화 문자열일 가능성
+                        console.log(`[이미지 저장] ⚠️ attachment JSON 파싱 실패, 복호화 시도: ${e.message}`);
+                        
+                        // Base64 문자열인지 확인
+                        const isBase64Like = /^[A-Za-z0-9+/=]+$/.test(attachmentData.trim()) && attachmentData.length > 20;
+                        
+                        if (isBase64Like) {
+                            const encType = json.encType || json.enc_type || 31;
+                            
+                            // userId 추출 (senderId에서 숫자 부분)
+                            let decryptUserId = null;
+                            if (senderId) {
+                                const userIdMatch = String(senderId).match(/\d+/);
+                                if (userIdMatch) {
+                                    decryptUserId = parseInt(userIdMatch[0], 10);
+                                }
+                            }
+                            
+                            // myUserId도 시도
+                            if (!decryptUserId && json.myUserId) {
+                                const myUserIdNum = Number(json.myUserId);
+                                if (myUserIdNum > 1000) {
+                                    decryptUserId = myUserIdNum;
+                                }
+                            }
+                            
+                            if (decryptUserId) {
+                                console.log(`[이미지 저장] 복호화 시도: userId=${decryptUserId}, encType=${encType}`);
+                                const decrypted = decryptKakaoTalkMessage(attachmentData, decryptUserId, encType);
+                                
+                                if (decrypted) {
+                                    console.log(`[이미지 저장] ✅ attachment 복호화 성공: ${decrypted.substring(0, 100)}...`);
+                                    
+                                    // 복호화된 결과를 JSON으로 파싱 시도
+                                    try {
+                                        attachmentDecrypted = JSON.parse(decrypted);
+                                        console.log(`[이미지 저장] ✅ 복호화 후 JSON 파싱 성공`);
+                                    } catch (parseError) {
+                                        // JSON이 아니면 문자열 그대로 사용
+                                        console.log(`[이미지 저장] ⚠️ 복호화 결과가 JSON이 아님: ${decrypted.substring(0, 100)}...`);
+                                        // URL인지 확인
+                                        if (decrypted.startsWith('http://') || decrypted.startsWith('https://') || decrypted.startsWith('file://') || decrypted.startsWith('content://')) {
+                                            attachmentDecrypted = { url: decrypted };
+                                        } else {
+                                            attachmentDecrypted = { data: decrypted };
+                                        }
+                                    }
+                                } else {
+                                    console.log(`[이미지 저장] ⚠️ attachment 복호화 실패`);
+                                }
+                            } else {
+                                console.log(`[이미지 저장] ⚠️ 복호화를 위한 userId를 찾을 수 없음: senderId=${senderId}, myUserId=${json.myUserId}`);
+                            }
+                        }
                     }
-                  }
+                }
+                
+                console.log(`[이미지 저장] msgType=${msgType}, attachment_decrypted 존재=${!!attachmentDecrypted}, attachment 존재=${!!json.attachment}, attachmentData 존재=${!!attachmentData}, attachmentData 타입=${attachmentData ? typeof attachmentData : 'null'}`);
+                
+                // ⚠️ 중요: 이미지 처리 파이프라인 사용 (Primary → Fallback)
+                const { handleIncomingImageMessage } = require('./services/imageProcessor');
+                const roomName = decryptedRoomName || '';
+                
+                const imageResult = await handleIncomingImageMessage({
+                    roomName: roomName,
+                    senderId: senderId,
+                    senderName: senderName || sender || '',
+                    msgType: msgType,
+                    attachment: json.attachment,
+                    attachmentDecrypted: attachmentDecrypted || json.attachment_decrypted,
+                    imageUrlFromClient: imageUrlFromClient,
+                    encType: json.encType || json.enc_type || 31,
+                    kakaoLogId: json.kakao_log_id || json.id || null
+                });
+
+                // 로그: 처리 결과
+                if (imageResult.success) {
+                    console.log(`[이미지 저장] ✅ 이미지 처리 성공 (source=${imageResult.source}): ${imageResult.url}`);
+                    if (imageResult.trace) {
+                        console.log(`[이미지 저장] trace:`, JSON.stringify(imageResult.trace, null, 2));
+                    }
+                } else {
+                    // P0-3: 에러 코드 기반 로깅
+                    const errorCode = imageResult.errorCode || 'UNKNOWN';
+                    const stage = imageResult.stage || 'unknown';
+                    const detail = imageResult.detail || imageResult.error || '알 수 없는 오류';
+                    const correlationId = imageResult.correlationId || 'unknown';
+                    
+                    console.log(`[이미지 저장] [${correlationId}] ❌ 이미지 처리 실패: errorCode=${errorCode}, stage=${stage}`);
+                    console.log(`[이미지 저장] [${correlationId}] detail: ${detail}`);
+                    if (imageResult.trace) {
+                        console.log(`[이미지 저장] [${correlationId}] trace:`, JSON.stringify(imageResult.trace, null, 2));
+                    }
+                    
+                    // ⚠️ 중요: 이미지 처리 실패 시에도 질문 대기 상태 확인
+                    // Bridge fallback이 도착할 수 있으므로 질문 대기 상태를 유지
+                    const { getPendingQuestion, shouldShowFailureNotice, markFailureNoticeShown } = require('./labbot-node');
+                    const roomName = decryptedRoomName || '';
+                    
+                    if (senderId) {
+                        const pendingQuestion = getPendingQuestion(roomName, senderId);
+                        if (pendingQuestion) {
+                            console.log(`[이미지 저장] [${correlationId}] ⚠️ 이미지 처리 실패했지만 질문 대기 상태 유지 (Bridge fallback 대기)`);
+                            console.log(`[이미지 저장] [${correlationId}] ⚠️ 질문 대기 상태: title="${pendingQuestion.title}"`);
+                            console.log(`[이미지 저장] [${correlationId}] ⚠️ Bridge fallback 이미지가 도착하면 자동으로 처리됩니다`);
+                            
+                            // P0-3: 실패 안내 메시지 1회만 표시
+                            const cacheKey = `${roomName}|${senderId}`;
+                            const shouldShow = shouldShowFailureNotice(cacheKey);
+                            
+                            if (shouldShow) {
+                                // 사용자에게 명확한 피드백 제공 (1회만)
+                                ws.pendingImageReply = {
+                                    type: 'text',
+                                    text: "📷 이미지를 받았습니다.\n\n" +
+                                          "이미지 처리에 실패했습니다. (1) 다시 전송하거나 (2) '없음' 입력 시 이미지 없이 등록됩니다.\n\n" +
+                                          "Bridge fallback 이미지가 도착하면 자동으로 질문에 첨부됩니다.\n" +
+                                          "잠시만 기다려주세요..."
+                                };
+                                
+                                // 안내 메시지 표시 표시
+                                markFailureNoticeShown(cacheKey);
+                                console.log(`[이미지 저장] [${correlationId}] ⚠️ 실패 안내 메시지 표시 (1회): key="${cacheKey}"`);
+                            } else {
+                                console.log(`[이미지 저장] [${correlationId}] ⚠️ 실패 안내 메시지 스킵 (이미 표시됨): key="${cacheKey}"`);
+                            }
+                            
+                            // 질문 대기 상태는 유지하고, Bridge fallback을 기다림
+                            // 이미지 없이 진행하려면 사용자가 "없음"을 입력해야 함
+                            return; // 이미지 처리 실패 시 질문 대기 상태 유지
+                        }
+                    }
+                }
+                
+                if (imageResult.success && imageResult.url) {
+                  // 질문 대기 상태 확인 및 처리
+                  const { getAndClearPendingQuestion, processQuestionSubmission, setPendingAttachment } = require('./labbot-node');
                   
-                  await chatLogger.saveAttachment(
-                    savedMessage.id,
-                    'image',
-                    imageUrl,
-                    attachInfo?.name || null,
-                    attachInfo?.size || null,
-                    attachInfo?.mime_type || 'image/jpeg',
-                    attachInfo?.thumbnailUrl || null,
-                    attachInfo
-                  );
-                  console.log(`[이미지 저장] ✅ 성공: message_id=${savedMessage.id}, url=${imageUrl.substring(0, 50)}...`);
+                  console.log(`[이미지 + 질문] 디버그: roomName="${roomName}", senderId="${senderId}", sender="${sender}", senderName="${senderName}"`);
                   
-                  // Phase 4: 캐시에 저장
-                  const { setPendingAttachment } = require('./labbot-node');
-                  const roomName = decryptedRoomName || '';
                   if (senderId) {
-                    setPendingAttachment(roomName, senderId, imageUrl);
+                    // 질문 대기 상태 확인 (사용자별로 1:1 대응)
+                    console.log(`[이미지 + 질문] 질문 대기 상태 확인 시작: roomName="${roomName}", senderId="${senderId}"`);
+                    const pendingQuestion = getAndClearPendingQuestion(roomName, senderId);
+                    
+                    if (pendingQuestion) {
+                      console.log(`[이미지 + 질문] ✅ 질문 대기 상태 발견 (사용자 ID: ${senderId}): 이미지와 함께 질문 처리`);
+                      console.log(`[이미지 + 질문] 질문 정보: title="${pendingQuestion.title}", content="${pendingQuestion.content.substring(0, 30)}..."`);
+                      console.log(`[이미지 + 질문] 이미지 URL: ${imageResult.url.substring(0, 100)}...`);
+                      
+                      // 질문과 함께 처리 (비동기 병렬 처리 가능)
+                      const questionReplies = await processQuestionSubmission(roomName, sender || senderName || '', pendingQuestion.title, pendingQuestion.content, imageResult.url);
+                      const { createCacheKey } = require('./db/utils/roomKeyNormalizer');
+                      const cacheKey = createCacheKey(roomName, senderId);
+                      console.log(`[이미지 + 질문] ✅ 질문 처리 완료 (key="${cacheKey}"): ${questionReplies.length}개 응답`);
+                      
+                      // 질문 응답을 ws 객체에 저장하여 이후 handleMessage 호출 전에 확인하도록 함
+                      ws.pendingQuestionReplies = questionReplies || [];
+                      
+                      // ⚠️ 중요: 질문 대기 상태가 이미 getAndClearPendingQuestion에서 삭제되었는지 확인
+                      // 혹시 모를 경우를 대비해 한 번 더 확인 및 삭제
+                      const { getPendingQuestion } = require('./labbot-node');
+                      const remainingQuestion = getPendingQuestion(roomName, senderId);
+                      if (remainingQuestion) {
+                        console.log(`[이미지 + 질문] ⚠️ 질문 대기 상태가 남아있음 - 강제 삭제`);
+                        const { getAndClearPendingQuestion } = require('./labbot-node');
+                        getAndClearPendingQuestion(roomName, senderId);
+                      }
+                      
+                      // 질문 대기 상태 초기화 완료 확인
+                      console.log(`[이미지 + 질문] ✅ 질문 대기 상태 초기화 완료 (사용자 ID: ${senderId})`);
+                    } else {
+                      console.log(`[이미지 + 질문] ⚠️ 질문 대기 상태 없음: roomName="${roomName}", senderId="${senderId}"`);
+                      
+                      // 캐시에만 저장 (나중에 !질문 명령어에서 사용)
+                      // ⚠️ 중요: 질문 대기 상태가 없으면 답장을 보내지 않음 (무한루프 방지)
+                      setPendingAttachment(roomName, senderId, imageResult.url);
+                      console.log(`[이미지 저장] ✅ 이미지 캐시에 저장 완료 (답장 없음): ${imageResult.url.substring(0, 50)}...`);
+                      console.log(`[이미지 저장] 💡 !질문 명령어를 사용하시면 자동으로 이미지가 첨부됩니다.`);
+                      
+                      // 답장을 보내지 않음 (무한루프 방지)
+                      // ws.pendingImageReply는 설정하지 않음
+                    }
                   } else {
                     console.warn(`[이미지 저장] ⚠️ senderId가 없어 캐시 저장 스킵: message_id=${savedMessage.id}`);
                   }
                 } else {
-                  if (process.env.DEBUG_KAKAO_ATTACHMENT === '1') {
-                    console.log(`[이미지 저장] ⚠️ 이미지 URL 추출 실패: msgType=${msgType}, attachmentData 존재=${!!attachmentData}`);
+                  console.log(`[이미지 저장] ⚠️ 이미지 URL 추출 실패: msgType=${msgType}, attachmentData 존재=${!!attachmentData}, attachmentData 타입=${attachmentData ? typeof attachmentData : 'null'}`);
+                  if (attachmentData && typeof attachmentData === 'object') {
+                    console.log(`[이미지 저장] attachmentData keys: ${Object.keys(attachmentData).join(', ')}`);
+                    // attachmentData의 값 샘플 출력 (디버깅용)
+                    const sampleKeys = Object.keys(attachmentData).slice(0, 5);
+                    for (const key of sampleKeys) {
+                      const value = attachmentData[key];
+                      if (typeof value === 'string' && value.length > 0 && value.length < 200) {
+                        console.log(`[이미지 저장] attachmentData[${key}]: ${value.substring(0, 100)}...`);
+                      }
+                    }
+                  }
+                  
+                  // 이미지 URL 추출 실패했지만 질문 대기 상태가 있으면 경고
+                  if (senderId) {
+                    const { getAndClearPendingQuestion } = require('./labbot-node');
+                    const roomName = decryptedRoomName || '';
+                    const pendingQuestion = getAndClearPendingQuestion(roomName, senderId);
+                    if (pendingQuestion) {
+                      console.warn(`[이미지 저장] ⚠️⚠️⚠️ 질문 대기 상태가 있지만 이미지 URL 추출 실패! 질문은 이미지 없이 처리될 수 있습니다.`);
+                      console.warn(`[이미지 저장] 질문 정보: title="${pendingQuestion.title}", msgType=${msgType}, imageUrlFromClient=${!!imageUrlFromClient}, hasImageFromClient=${hasImageFromClient}`);
+                      // 질문 대기 상태를 다시 저장 (이미 getAndClearPendingQuestion에서 삭제되었으므로)
+                      const { setPendingQuestion } = require('./labbot-node');
+                      setPendingQuestion(roomName, senderId, pendingQuestion.title, pendingQuestion.content);
+                      console.warn(`[이미지 저장] 질문 대기 상태 복원 완료 - 다음 메시지에서 재시도 가능`);
+                    }
+                  }
+                }
+              } else {
+                // 이미지 메시지로 판단되지 않은 경우 상세 로그
+                console.log(`[이미지 저장] ⚠️ 이미지 메시지가 아님: msgType=${msgType}, imageUrlFromClient=${!!imageUrlFromClient}, hasImageFromClient=${hasImageFromClient}`);
+                console.log(`[이미지 저장] ⚠️ 원본 JSON 필드 확인:`);
+                console.log(`  - json.image_url: ${json.image_url ? '존재' : '없음'} (타입: ${typeof json.image_url}, 값: ${json.image_url ? String(json.image_url).substring(0, 50) + '...' : 'null'})`);
+                console.log(`  - json.has_image: ${json.has_image} (타입: ${typeof json.has_image}, 원본: ${JSON.stringify(json.has_image)})`);
+                console.log(`  - json.msg_type: ${json.msg_type} (타입: ${typeof json.msg_type})`);
+                console.log(`  - json.type: ${json.type} (타입: ${typeof json.type})`);
+                console.log(`  - json.attachment 존재: ${!!json.attachment}`);
+                console.log(`  - json.attachment_decrypted 존재: ${!!json.attachment_decrypted}`);
+                
+                // attachment에 이미지 URL이 있는지 재확인 (클라이언트에서 추출 실패했을 수 있음)
+                if (json.attachment || json.attachment_decrypted) {
+                  const { extractImageUrl } = require('./db/utils/attachmentExtractor');
+                  let attachmentData = json.attachment_decrypted || json.attachment || null;
+                  
+                  if (attachmentData && typeof attachmentData === 'string' && !json.attachment_decrypted) {
+                    try {
+                      attachmentData = JSON.parse(attachmentData);
+                    } catch (e) {
+                      // 파싱 실패
+                    }
+                  }
+                  
+                  if (attachmentData) {
+                    const fallbackImageUrl = extractImageUrl(attachmentData, msgType);
+                    if (fallbackImageUrl) {
+                      console.log(`[이미지 저장] ⚠️⚠️⚠️ 클라이언트에서 추출 실패했지만 서버에서 이미지 URL 발견: ${fallbackImageUrl.substring(0, 50)}...`);
+                      console.log(`[이미지 저장] ⚠️⚠️⚠️ 이미지 메시지로 재판단하여 처리합니다.`);
+                      
+                      // 이미지 메시지로 재처리
+                      const { getAndClearPendingQuestion, processQuestionSubmission, setPendingAttachment } = require('./labbot-node');
+                      const roomName = decryptedRoomName || '';
+                      
+                      if (senderId) {
+                        const pendingQuestion = getAndClearPendingQuestion(roomName, senderId);
+                        if (pendingQuestion) {
+                          console.log(`[이미지 저장] ✅ 질문 대기 상태 발견 (재처리): 이미지와 함께 질문 처리`);
+                          const questionReplies = await processQuestionSubmission(roomName, sender || senderName || '', pendingQuestion.title, pendingQuestion.content, fallbackImageUrl);
+                          ws.pendingQuestionReplies = questionReplies || [];
+                          console.log(`[이미지 저장] ✅ 질문 처리 완료 (재처리): ${questionReplies.length}개 응답`);
+                          return; // 이미지 메시지 처리 종료
+                        } else {
+                          // 질문 대기 상태가 없으면 캐시에만 저장
+                          setPendingAttachment(roomName, senderId, fallbackImageUrl);
+                          console.log(`[이미지 저장] ✅ 캐시 저장 (재처리): url=${fallbackImageUrl.substring(0, 50)}...`);
+                        }
+                      }
+                    }
+                  }
+                }
+                
+                // 이미지 메시지가 아니지만 질문 대기 상태가 있으면 경고
+                if (senderId) {
+                  const { getAndClearPendingQuestion, setPendingQuestion } = require('./labbot-node');
+                  const roomName = decryptedRoomName || '';
+                  const pendingQuestion = getAndClearPendingQuestion(roomName, senderId);
+                  if (pendingQuestion) {
+                    console.warn(`[이미지 저장] ⚠️⚠️⚠️ 질문 대기 상태가 있지만 이미지 메시지가 아님! 텍스트 메시지로 처리될 수 있습니다.`);
+                    console.warn(`[이미지 저장] 질문 정보: title="${pendingQuestion.title}", msgType=${msgType}, message="${(decryptedMessage || '').substring(0, 50)}"`);
+                    // 질문 대기 상태를 다시 저장 (이미 getAndClearPendingQuestion에서 삭제되었으므로)
+                    setPendingQuestion(roomName, senderId, pendingQuestion.title, pendingQuestion.content);
+                    console.warn(`[이미지 저장] 질문 대기 상태 복원 완료 - 다음 메시지에서 재시도 가능`);
                   }
                 }
               }
@@ -2242,16 +3219,85 @@ wss.on('connection', function connection(ws, req) {
             }
           }
         } catch (err) {
-          console.error('[채팅 로그] 저장 실패 (계속 진행):', err.message);
+          const kakaoLogId = json?._id || json?.kakao_log_id || 'N/A';
+          console.error(`[메시지 저장] ❌❌❌ 저장 실패 (예외 발생): kakao_log_id=${kakaoLogId}, room="${decryptedRoomName || ''}", sender="${senderName || sender || ''}"`);
+          console.error(`[메시지 저장] ❌❌❌ 에러 메시지: ${err.message}`);
+          console.error(`[메시지 저장] ❌❌❌ 스택 트레이스:`, err.stack);
         }
         
-        const replies = await handleMessage(
-          decryptedRoomName || '',
-          decryptedMessage || '',
-          senderName || sender || '',  // 닉네임 우선, 없으면 원본 sender 사용
-          isGroupChat !== undefined ? isGroupChat : true,
-          replyToMessageId  // 답장 메시지 ID 전달
-        );
+        // 이미지 메시지에서 질문 처리된 경우 replies가 ws 객체에 저장되었을 수 있음
+        // 사용자별로 독립적으로 처리되므로 동시 요청 충돌 없음
+        let replies = [];
+        if (ws.pendingQuestionReplies && ws.pendingQuestionReplies.length > 0) {
+          replies = ws.pendingQuestionReplies;
+          ws.pendingQuestionReplies = null; // ws 객체 초기화
+          console.log(`[질문 응답] ws 객체에서 replies 가져옴: ${replies.length}개`);
+        } else if (ws.pendingImageReply) {
+          // ⚠️ 중요: 이미지 메시지에 대한 답장 (서버에 저장된 이미지 URL)
+          console.log(`[이미지 답장] ⚠️⚠️⚠️ ws.pendingImageReply 발견: ${JSON.stringify(ws.pendingImageReply)}`);
+          replies.push(ws.pendingImageReply);
+          ws.pendingImageReply = null; // ws 객체 초기화
+          console.log(`[이미지 답장] ✅ ws 객체에서 이미지 답장 가져옴: ${replies[0].imageUrl}, replies.length=${replies.length}`);
+        } else if (isImageMessageEarly && imageUrlEarly && senderId) {
+          // ⚠️ 중요: 이미지 메시지가 조기 감지된 경우, 질문 대기 상태 확인
+          console.log(`[이미지 조기 처리] 이미지 메시지로 확인됨 - 질문 대기 상태 확인: senderId="${senderId}"`);
+          const { getAndClearPendingQuestion, processQuestionSubmission, setPendingAttachment } = require('./labbot-node');
+          const roomName = decryptedRoomName || '';
+          const pendingQuestion = getAndClearPendingQuestion(roomName, senderId);
+          
+          if (pendingQuestion) {
+            console.log(`[이미지 조기 처리] ✅ 질문 대기 상태 발견: 이미지와 함께 질문 처리`);
+            replies = await processQuestionSubmission(roomName, senderName || sender || '', pendingQuestion.title, pendingQuestion.content, imageUrlEarly);
+            console.log(`[이미지 조기 처리] ✅ 질문 처리 완료: ${replies.length}개 응답`);
+          } else {
+            // ⚠️ 중요: 질문 대기 상태가 없어도 이미지를 서버에 저장하고 URL을 답장으로 전송
+            const { downloadAndSaveImage } = require('./utils/imageDownloader');
+            const downloadResult = await downloadAndSaveImage(imageUrlEarly);
+            
+            if (downloadResult.success) {
+              console.log(`[이미지 조기 처리] ✅ 서버에 저장 완료: ${downloadResult.filename} -> ${downloadResult.url}`);
+              
+              // 캐시에도 저장 (나중에 !질문 명령어에서 사용)
+              setPendingAttachment(roomName, senderId, downloadResult.url);
+              
+              // 답장으로 이미지 URL 전송
+              replies.push({
+                type: 'image',
+                text: `📷 이미지가 서버에 저장되었습니다.\n\nURL: ${downloadResult.url}`,
+                imageUrl: downloadResult.url
+              });
+              
+              console.log(`[이미지 조기 처리] ✅ 답장 준비 완료: ${downloadResult.url}`);
+            } else {
+              console.error(`[이미지 조기 처리] ❌ 서버 저장 실패: ${downloadResult.error}`);
+              // 원본 URL을 캐시에 저장 (다운로드 실패 시)
+              setPendingAttachment(roomName, senderId, imageUrlEarly);
+              console.log(`[이미지 조기 처리] ⚠️ 원본 URL을 캐시에 저장: ${imageUrlEarly.substring(0, 50)}...`);
+              replies = [];
+            }
+          }
+        } else {
+          // ⚠️ 중요: 이미지 처리 실패 플래그가 설정되어 있으면
+          // handleMessage에서 중복 메시지를 방지하기 위해 플래그 전달
+          // 하지만 handleMessage는 ws 객체에 직접 접근할 수 없으므로
+          // 여기서는 일반적으로 호출하고, ws.pendingImageReply가 있으면 우선 처리됨
+          
+          // ⚠️ 중요: handleMessage에 복호화된 sender 전달
+          // finalSender는 위에서 이미 복호화된 senderName으로 설정됨
+          replies = await handleMessage(
+            decryptedRoomName || '',
+            decryptedMessage || '',
+            finalSender,  // 복호화된 sender 사용 (위에서 설정됨)
+            isGroupChat !== undefined ? isGroupChat : true,
+            replyToMessageId,  // 답장 메시지 ID 전달 (DB id)
+            json,  // ⚠️ 중요: json 파라미터 전달 (복호화를 위해 필요)
+            replyToKakaoLogId  // ⚠️ 중요: reply_to_kakao_log_id 전달 (신고 기능을 위해 필요)
+          );
+          
+          // ⚠️ 중요: 이미지 처리 실패 플래그가 설정되어 있고
+          // handleMessage에서 "이미지를 보내시면..." 메시지를 반환한 경우
+          // ws.pendingImageReply가 우선이므로 여기서는 추가 처리 불필요
+        }
         
         console.log(`[${new Date().toISOString()}] handleMessage 호출 후:`);
         console.log(`  replies.length: ${replies.length}`);
@@ -2262,6 +3308,8 @@ wss.on('connection', function connection(ws, req) {
         }
         
         // 무단홍보 메시지 자동 삭제 명령 전송 (handleMessage 호출 후 확인)
+        // ⚠️ 주석 처리: 자동 삭제 기능 비활성화
+        /*
         const lastPromotionResult = global.lastPromotionResult;
         if (lastPromotionResult && lastPromotionResult.shouldDelete) {
           // Bridge APK 클라이언트 찾기
@@ -2275,14 +3323,38 @@ wss.on('connection', function connection(ws, req) {
           }
           
           if (bridgeClients.length > 0) {
+            // ⚠️ 중요: 복호화된 메시지 텍스트 사용 (Bridge APK가 메시지를 찾을 수 있도록)
+            // decryptedMessage가 있으면 우선 사용, 없으면 원본 메시지 사용
+            const messageTextForDelete = decryptedMessage || lastPromotionResult.messageText || lastPromotionResult.originalMessage || '';
+            
+            // roomKey도 복호화된 값 사용 (캐시에서 찾기)
+            let roomKeyForDelete = lastPromotionResult.roomKey || decryptedRoomName || room || '';
+            // roomKey 캐시에서 최신 roomKey 가져오기
+            if (typeof getRoomKeyFromCache === 'function') {
+              const cachedRoomKey = getRoomKeyFromCache(roomKeyForDelete);
+              if (cachedRoomKey) {
+                roomKeyForDelete = cachedRoomKey;
+                console.log(`[무단홍보 삭제] ✅ 캐시에서 roomKey 찾음: "${roomKeyForDelete}"`);
+              }
+            }
+            // 캐시에서 못 찾으면 CONFIG.ROOM_KEY 사용
+            if (!roomKeyForDelete) {
+              roomKeyForDelete = CONFIG.ROOM_KEY || CONFIG.ROOM_NAME || '';
+              console.log(`[무단홍보 삭제] ⚠️ CONFIG.ROOM_KEY 사용: "${roomKeyForDelete}"`);
+            }
+            
             const deleteMessage = {
               type: 'delete',
-              roomKey: lastPromotionResult.roomKey || decryptedRoomName || room || '',
-              messageText: lastPromotionResult.messageText || decryptedMessage || ''
+              roomKey: roomKeyForDelete,
+              messageText: messageTextForDelete
             };
             
             console.log(`[무단홍보 삭제] ═══════════════════════════════════════════════════════`);
-            console.log(`[무단홍보 삭제] 삭제 명령 전송: roomKey="${deleteMessage.roomKey}", messageText="${deleteMessage.messageText.substring(0, 50)}..."`);
+            console.log(`[무단홍보 삭제] 삭제 명령 전송:`);
+            console.log(`[무단홍보 삭제]   roomKey: "${deleteMessage.roomKey}"`);
+            console.log(`[무단홍보 삭제]   messageText: "${deleteMessage.messageText.substring(0, 50)}${deleteMessage.messageText.length > 50 ? '...' : ''}"`);
+            console.log(`[무단홍보 삭제]   messageText 길이: ${deleteMessage.messageText.length}`);
+            console.log(`[무단홍보 삭제]   복호화 상태: ${decryptedMessage ? '복호화됨' : '원본 사용'}`);
             
             try {
               bridgeClients[0].send(JSON.stringify(deleteMessage));
@@ -2299,6 +3371,7 @@ wss.on('connection', function connection(ws, req) {
           // 전역 변수 초기화
           global.lastPromotionResult = null;
         }
+        */
         
         // 닉네임 변경 알림 추가 (있는 경우)
         if (nicknameChangeNotification) {
@@ -2586,12 +3659,18 @@ wss.on('connection', function connection(ws, req) {
       
       // 디버깅: handleMessage 호출 전 로그
       console.log(`[서버] handleMessage 호출 전: room="${room}", msg="${msg.substring(0, 100)}", sender="${sender}"`);
+      
+      // messageData.json 추출 (복호화를 위해 필요)
+      // json 변수가 이미 선언되어 있을 수 있으므로 재할당만 수행
+      const messageJson = messageData.json || null;
 
       const replies = await handleMessage(
         room,
         msg,
         sender,
-        isGroupChat !== undefined ? isGroupChat : true
+        isGroupChat !== undefined ? isGroupChat : true,
+        null,  // replyToMessageId (기존 형식에서는 null)
+        messageJson  // ⚠️ 중요: json 파라미터 전달 (복호화를 위해 필요)
       );
       
       // 디버깅: handleMessage 호출 후 로그
@@ -2658,9 +3737,25 @@ wss.on('connection', function connection(ws, req) {
       }
     } catch (error) {
       console.error(`[${new Date().toISOString()}] 메시지 처리 오류:`, error);
+      console.error(`[${new Date().toISOString()}] 메시지 처리 오류 스택:`, error.stack);
+      console.error(`[${new Date().toISOString()}] 메시지 처리 오류 상세:`, JSON.stringify(error, Object.getOwnPropertyNames(error)));
+      console.error(`[${new Date().toISOString()}] 메시지 처리 오류 메시지:`, error.message);
+      console.error(`[${new Date().toISOString()}] 메시지 처리 오류 이름:`, error.name);
+      console.error(`[${new Date().toISOString()}] 메시지 처리 오류 타입:`, typeof error);
+      
+      // 에러 객체의 모든 속성 출력
+      if (error && typeof error === 'object') {
+        console.error(`[${new Date().toISOString()}] 메시지 처리 오류 속성:`, Object.keys(error));
+        for (const key in error) {
+          if (error.hasOwnProperty(key)) {
+            console.error(`[${new Date().toISOString()}] 메시지 처리 오류.${key}:`, error[key]);
+          }
+        }
+      }
+      
       ws.send(JSON.stringify({
         error: "Internal server error",
-        message: error.message
+        message: error.message || String(error)
       }));
     }
   });
@@ -2703,10 +3798,8 @@ async function checkAndSendScheduledNotice() {
         const currentTime = `${kstTime.getHours()}:${String(kstTime.getMinutes()).padStart(2, '0')}`;
         const currentMinute = kstTime.getMinutes();
         
-        // 30분 간격 체크: 정확한 시간(예: 09:00, 09:30, 14:00 등)에만 발송
-        // 스케줄 시간은 보통 0분 또는 30분에 설정되므로, 이때만 처리
-        // 단, 사용자가 15분, 45분 등 다른 시간을 설정한 경우도 처리 가능하도록 체크
-        // (shouldSendScheduledNotice 내에서 정확한 시간 비교 수행)
+        // 1분 간격 체크: 정확한 시간(예: 09:00, 09:15, 09:30, 14:00 등)에 발송
+        // shouldSendScheduledNotice 내에서 정확한 시간 비교 수행
         
         const result = await NOTICE_SYSTEM.shouldSendScheduledNotice();
         
@@ -2758,32 +3851,33 @@ async function checkAndSendScheduledNotice() {
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`[${new Date().toISOString()}] HTTP listening on 0.0.0.0:${PORT}`);
   
-  // 스케줄 공지 체크 시작 (30분마다)
+  // 스케줄 공지 체크 시작 (1분마다 - 정확한 시간에 발송하기 위해)
   scheduleNoticeInterval = setInterval(async () => {
       await checkAndSendScheduledNotice();
-  }, 1800000); // 30분마다 체크 (1800000ms = 30분)
+  }, 60000); // 1분마다 체크 (60000ms = 1분) - 정확한 시간에 발송하기 위해
   
-  console.log(`[${new Date().toISOString()}] 스케줄 공지 자동 체크 시작 (30분 간격)`);
+  console.log(`[${new Date().toISOString()}] 스케줄 공지 자동 체크 시작 (1분 간격)`);
   
   // 백필 작업 주기적 실행 (5분마다)
   setInterval(async () => {
     try {
+      const chatLogger = require('./db/chatLogger');
       await chatLogger.backfillAllPendingReplies();
     } catch (err) {
       console.error('[백필] 주기적 백필 작업 실패:', err.message);
+      console.error('[백필] 스택 트레이스:', err.stack);
     }
   }, 5 * 60 * 1000);  // 5분마다 실행
   
   console.log(`[${new Date().toISOString()}] 백필 작업 자동 실행 시작 (5분 간격)`);
 });
 
-// 종료 처리 (로그 스트림 닫기 포함)
+// 종료 처리 (로그 스트림 닫기는 logManager에서 처리)
 function shutdown(signal) {
   return function() {
     console.log(`[${new Date().toISOString()}] 서버 종료(${signal})...`);
-    if (logStream) {
-      logStream.end();
-    }
+    // 로그 정리는 logManager에서 처리
+    logManager.shutdown();
     if (wss) {
       wss.close(() => {
         if (server) {
@@ -2808,4 +3902,11 @@ process.on('uncaughtException', function (error) {
 process.on('unhandledRejection', function (reason) {
   console.error(`[${new Date().toISOString()}] unhandledRejection:`, reason);
 });
+
+// decryptKakaoTalkMessage 함수 export (labbot-node.js에서 사용)
+// circular dependency 방지를 위해 module.exports와 global 모두 설정
+module.exports.decryptKakaoTalkMessage = decryptKakaoTalkMessage;
+if (typeof global !== 'undefined') {
+    global.decryptKakaoTalkMessage = decryptKakaoTalkMessage;
+}
 

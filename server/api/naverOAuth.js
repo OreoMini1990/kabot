@@ -70,10 +70,25 @@ NAVER_REDIRECT_URI=${redirectUri}</pre>
  * OAuth Callback (Authorization Code를 Access Token으로 교환)
  */
 router.get('/callback', async (req, res) => {
+    // ⚠️ 1차 조치: 콜백이 실제로 타는지 강제 확정 로그
+    console.log(`[OAUTH-HIT] ==========================================`);
+    console.log(`[OAUTH-HIT] path=${req.originalUrl}`);
+    console.log(`[OAUTH-HIT] code?=${!!req.query.code}, state_len=${(req.query.state || '').length}`);
+    console.log(`[OAUTH-HIT] user-agent=${req.get('user-agent')?.substring(0, 50) || 'N/A'}`);
+    console.log(`[OAUTH-HIT] ==========================================`);
+    
+    console.log(`[OAUTH-CB] [api/naverOAuth] ==========================================`);
+    console.log(`[OAUTH-CB] [api/naverOAuth] 콜백 수신 시작`);
+    console.log(`[OAUTH-CB] [api/naverOAuth]   query.code: ${req.query.code ? '있음' : '없음'}`);
+    console.log(`[OAUTH-CB] [api/naverOAuth]   query.state: ${req.query.state ? '있음' : '없음'}`);
+    console.log(`[OAUTH-CB] [api/naverOAuth]   query.error: ${req.query.error || '없음'}`);
+    console.log(`[OAUTH-CB] [api/naverOAuth] ==========================================`);
+    
     try {
         const { code, state, error } = req.query;
         
         if (error) {
+            console.error(`[OAUTH-CB] [api/naverOAuth] ❌ 콜백 에러: ${error}`);
             return res.status(400).send(`
                 <html>
                     <head><title>인증 오류</title></head>
@@ -87,6 +102,7 @@ router.get('/callback', async (req, res) => {
         }
         
         if (!code) {
+            console.error(`[OAUTH-CB] [api/naverOAuth] ❌ 인증 코드 없음`);
             return res.status(400).send(`
                 <html>
                     <head><title>인증 코드 없음</title></head>
@@ -129,20 +145,119 @@ router.get('/callback', async (req, res) => {
                 console.warn('[네이버 OAuth] 사용자 정보 가져오기 실패 (무시):', err.message);
             }
             
-            // DB에 토큰 저장
+            // State에서 user_id와 draft_id 추출 (routes/naverOAuth.js와 동일한 방식)
+            let kakaoUserId = null;
+            let draftId = null;
+            
+            if (state) {
+                try {
+                    const { verifyState } = require('../routes/naverOAuth');
+                    const statePayload = verifyState(state);
+                    if (statePayload) {
+                        kakaoUserId = String(statePayload.userId);
+                        draftId = statePayload.draftId || null;
+                        console.log(`[OAUTH-CB] [api/naverOAuth] State에서 추출: user_id=${kakaoUserId}, draft_id=${draftId || 'null'}`);
+                    } else {
+                        console.warn(`[OAUTH-CB] [api/naverOAuth] State 검증 실패, state 파싱 시도`);
+                        // State 검증 실패 시, state를 직접 파싱 시도 (간단한 base64일 수 있음)
+                        try {
+                            const decoded = Buffer.from(state, 'base64url').toString();
+                            const parsed = JSON.parse(decoded);
+                            if (parsed.userId) {
+                                kakaoUserId = String(parsed.userId);
+                                draftId = parsed.draftId || null;
+                                console.log(`[OAUTH-CB] [api/naverOAuth] State 직접 파싱 성공: user_id=${kakaoUserId}, draft_id=${draftId || 'null'}`);
+                            }
+                        } catch (parseErr) {
+                            console.warn(`[OAUTH-CB] [api/naverOAuth] State 파싱 실패:`, parseErr.message);
+                        }
+                    }
+                } catch (stateErr) {
+                    console.warn(`[OAUTH-CB] [api/naverOAuth] State 처리 중 오류:`, stateErr.message);
+                }
+            }
+            
+            // DB에 토큰 저장 (카카오 user_id 사용)
             const saveResult = await saveToken({
                 access_token: result.access_token,
                 refresh_token: result.refresh_token,
                 expires_in: result.expires_in,
                 token_type: result.token_type || 'bearer',
-                user_id: userInfo?.id || null,
+                user_id: kakaoUserId || userInfo?.id || null,  // 카카오 user_id 우선
                 user_name: userInfo?.name || null
             });
             
             if (!saveResult) {
-                console.error('[네이버 OAuth] 토큰 DB 저장 실패 (토큰은 발급되었지만 저장되지 않음)');
+                console.error('[OAUTH-CB] [api/naverOAuth] ❌ 토큰 DB 저장 실패');
             } else {
-                console.log('[네이버 OAuth] 토큰 DB 저장 완료');
+                console.log('[OAUTH-CB] [api/naverOAuth] ✅ 토큰 DB 저장 완료');
+                console.log(`[OAUTH-CB] [api/naverOAuth]   user_id: ${kakaoUserId || userInfo?.id || 'null'}`);
+                console.log(`[OAUTH-CB] [api/naverOAuth]   draft_id: ${draftId || 'null'}`);
+            }
+            
+            // ⚠️ 핵심: resumeDraftAfterOAuth 호출
+            // state에서 user_id를 못 찾았어도, 저장된 user_id로 재개 시도
+            const finalUserId = kakaoUserId || userInfo?.id || null;
+            
+            console.log(`[OAUTH-CB] [api/naverOAuth] [재개 준비]`);
+            console.log(`[OAUTH-CB] [api/naverOAuth]   kakaoUserId: ${kakaoUserId || 'null'}`);
+            console.log(`[OAUTH-CB] [api/naverOAuth]   userInfo?.id: ${userInfo?.id || 'null'}`);
+            console.log(`[OAUTH-CB] [api/naverOAuth]   finalUserId: ${finalUserId || 'null'}`);
+            console.log(`[OAUTH-CB] [api/naverOAuth]   draftId: ${draftId || 'null'}`);
+            console.log(`[OAUTH-CB] [api/naverOAuth]   saveResult: ${saveResult}`);
+            
+            if (finalUserId && saveResult) {
+                console.log(`[OAUTH-CB] [api/naverOAuth] [재개 시작] resumeDraftAfterOAuth 호출`);
+                console.log(`[OAUTH-CB] [api/naverOAuth]   userId: ${finalUserId}, draftId: ${draftId || 'null'}`);
+                
+                try {
+                    const { resumeDraftAfterOAuth } = require('../utils/resumeDraftService');
+                    const resumeResult = await resumeDraftAfterOAuth(finalUserId, draftId);
+                    
+                    console.log(`[OAUTH-CB] [api/naverOAuth] [재개 결과]`, JSON.stringify(resumeResult, null, 2));
+                    
+                    // 재개 성공 시 사용자 알림 (6차 조치: sendFollowUp null 처리)
+                    if (resumeResult.ok && resumeResult.roomName) {
+                        try {
+                            // ⚠️ 6차 조치: sendFollowUp 존재 여부 로그
+                            console.log(`[OAUTH-NOTIFY] sendFollowUp exists=${!!global.sendFollowUpMessageFunction}`);
+                            
+                            const sendFollowUpMessageFunction = global.sendFollowUpMessageFunction;
+                            
+                            if (sendFollowUpMessageFunction) {
+                                const authorLine = resumeResult.authorName
+                                    ? `작성자 : ${resumeResult.authorName}\n\n`
+                                    : '';
+                                const message = `✅ 네이버 계정 연동이 완료되었습니다!\n\n` +
+                                    authorLine +
+                                    `📋 제목: ${resumeResult.title || 'N/A'}\n\n` +
+                                    `🔗 답변하러 가기: ${resumeResult.url || 'N/A'}`;
+                                
+                                sendFollowUpMessageFunction(resumeResult.roomName, message);
+                                console.log(`[OAUTH-NOTIFY] ✅ notify_ok room=${resumeResult.roomName}`);
+                            } else {
+                                console.warn(`[OAUTH-NOTIFY] ⚠️ sendFollowUpMessageFunction null - 세이프티넷으로 처리 예정`);
+                            }
+                        } catch (notifyErr) {
+                            console.error(`[OAUTH-NOTIFY] ❌ notify 실패:`, notifyErr.message);
+                            console.error(`[OAUTH-NOTIFY] 스택:`, notifyErr.stack);
+                        }
+                    } else if (!resumeResult.ok) {
+                        console.warn(`[OAUTH-CB] [api/naverOAuth] [재개 결과] ⚠️ 재개 실패: reason=${resumeResult.reason}, error=${resumeResult.error || 'N/A'}`);
+                        console.warn(`[OAUTH-CB] [api/naverOAuth] [재개 결과]   roomName: ${resumeResult.roomName || 'null'}`);
+                    }
+                } catch (resumeErr) {
+                    console.error(`[OAUTH-CB] [api/naverOAuth] [재개] ❌ 예외 발생:`, resumeErr.message);
+                    console.error(`[OAUTH-CB] [api/naverOAuth] [재개] 스택:`, resumeErr.stack);
+                }
+            } else {
+                console.warn(`[OAUTH-CB] [api/naverOAuth] ⚠️ 재개 로직 스킵`);
+                if (!finalUserId) {
+                    console.warn(`[OAUTH-CB] [api/naverOAuth]   - user_id 없음 (kakaoUserId=${kakaoUserId || 'null'}, userInfo?.id=${userInfo?.id || 'null'})`);
+                }
+                if (!saveResult) {
+                    console.warn(`[OAUTH-CB] [api/naverOAuth]   - 토큰 저장 실패`);
+                }
             }
             res.send(`
                 <html>

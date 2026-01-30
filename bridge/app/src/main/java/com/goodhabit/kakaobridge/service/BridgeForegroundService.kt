@@ -283,7 +283,7 @@ class BridgeForegroundService : Service() {
         
         // TODO: SharedPreferences에서 WebSocket URL 읽기
         val wsUrl = getSharedPreferences("bridge_prefs", MODE_PRIVATE)
-            .getString("websocket_url", "ws://211.218.42.222:5002/ws") ?: "ws://211.218.42.222:5002/ws"
+            .getString("websocket_url", "ws://192.168.0.15:5002/ws") ?: "ws://192.168.0.15:5002/ws"
 
         Log.i(TAG, "═══════════════════════════════════════════════════════")
         Log.i(TAG, "🔌 WebSocket 연결 시도")

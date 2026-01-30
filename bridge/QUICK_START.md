@@ -56,3 +56,7 @@ cd D:\JosupAI\kakkaobot\bridge
 3. 배터리 최적화 제외 설정 (자동 요청)
 4. 서비스 시작 버튼 클릭
 
+
+
+
+

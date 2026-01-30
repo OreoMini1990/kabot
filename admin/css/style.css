@@ -46,7 +46,7 @@ header h1 {
     font-size: 14px;
 }
 
-.auth-section button {
+.auth-section button:not(.btn-log) {
     padding: 8px 16px;
     background: #3498db;
     color: white;
@@ -56,7 +56,7 @@ header h1 {
     font-size: 14px;
 }
 
-.auth-section button:hover {
+.auth-section button:not(.btn-log):hover {
     background: #2980b9;
 }
 
@@ -104,6 +104,28 @@ header h1 {
 .tab-btn.active {
     color: #3498db;
     border-bottom-color: #3498db;
+}
+
+/* 네비게이션 탭 영역의 로그 버튼 스타일 */
+.tabs .btn-log,
+#logs-btn {
+    background-color: #4a90e2 !important;
+    color: white !important;
+    border-radius: 4px !important;
+    margin-left: auto !important;
+    display: inline-block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    padding: 10px 20px !important;
+    border: none !important;
+    cursor: pointer !important;
+    font-size: 16px !important;
+}
+
+.tabs .btn-log:hover,
+#logs-btn:hover {
+    background-color: #357abd !important;
+    color: white !important;
 }
 
 .tab-content {
@@ -347,4 +369,43 @@ tbody tr:hover {
     background: #95a5a6;
     color: white;
 }
+
+.btn-log {
+    background-color: #4a90e2 !important;
+    color: white !important;
+    border: none !important;
+    padding: 8px 16px !important;
+    border-radius: 4px !important;
+    cursor: pointer !important;
+    font-size: 14px !important;
+}
+
+.btn-log:hover {
+    background-color: #357abd !important;
+}
+
+/* 로그 버튼 숨김/표시 제어 */
+.hidden {
+    display: none !important;
+}
+
+/* 네비게이션 탭 영역의 로그 버튼은 항상 표시 */
+.tabs #logs-btn,
+.tabs .btn-log {
+    display: inline-block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+.error {
+    color: #e74c3c;
+    padding: 10px;
+    background: #f8d7da;
+    border-radius: 4px;
+    margin: 10px 0;
+}
+
+
+
+
 
