@@ -1,4 +1,4 @@
-# KakaoTalk Bot System
+# KakkaoTalk Bot System
 
 카카오톡 오픈채팅방 봇 시스템
 
